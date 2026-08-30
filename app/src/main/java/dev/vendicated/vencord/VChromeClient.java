@@ -1,13 +1,11 @@
 package dev.vendicated.vencord;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.webkit.ConsoleMessage;
-import android.webkit.FileChooserParams;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -18,16 +16,16 @@ import java.util.Locale;
 public class VChromeClient extends WebChromeClient {
 
     /*
-     * IMPORTANT:
-     * MainActivity accesses this constant, so it MUST be public.
+     * MainActivity accesses this constant.
+     * DO NOT make this private.
      */
     public static final int RECORD_AUDIO_REQUEST_CODE = 4242;
 
     private final MainActivity activity;
 
     /*
-     * Keep the WebView permission request alive while Android
-     * shows the RECORD_AUDIO permission dialog.
+     * Keeps the WebView microphone request alive while Android
+     * asks for RECORD_AUDIO permission.
      */
     private PermissionRequest pendingWebPermissionRequest;
 
@@ -72,7 +70,7 @@ public class VChromeClient extends WebChromeClient {
     public boolean onShowFileChooser(
             WebView webView,
             ValueCallback<Uri[]> filePathCallback,
-            FileChooserParams fileChooserParams
+            WebChromeClient.FileChooserParams fileChooserParams
     ) {
 
         if (activity.filePathCallback != null) {
@@ -103,17 +101,14 @@ public class VChromeClient extends WebChromeClient {
 
     /*
      * ============================================================
-     * WEBVIEW MICROPHONE PERMISSION
+     * MICROPHONE PERMISSION
      * ============================================================
      *
-     * Discord requests microphone through:
+     * Handles Discord/WebView:
      *
      * navigator.mediaDevices.getUserMedia({
      *     audio: true
      * })
-     *
-     * Android RECORD_AUDIO permission and WebView's
-     * RESOURCE_AUDIO_CAPTURE permission are handled here.
      */
     @Override
     public void onPermissionRequest(
@@ -143,7 +138,7 @@ public class VChromeClient extends WebChromeClient {
         }
 
         /*
-         * We only handle microphone permission.
+         * Only handle microphone requests.
          */
         if (!wantsAudio) {
 
@@ -156,7 +151,8 @@ public class VChromeClient extends WebChromeClient {
         }
 
         /*
-         * Android < 6.0 does not have runtime permissions.
+         * Android versions below 6.0 don't use runtime
+         * permissions.
          */
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 
@@ -174,8 +170,8 @@ public class VChromeClient extends WebChromeClient {
                 ) == PackageManager.PERMISSION_GRANTED;
 
         /*
-         * Android permission already granted.
-         * Give microphone access directly to WebView.
+         * Already allowed by Android.
+         * Grant microphone to WebView immediately.
          */
         if (hasAndroidPermission) {
 
@@ -185,7 +181,7 @@ public class VChromeClient extends WebChromeClient {
         }
 
         /*
-         * Cancel any previous pending request.
+         * Cancel an older pending request.
          */
         if (pendingWebPermissionRequest != null) {
 
@@ -196,7 +192,7 @@ public class VChromeClient extends WebChromeClient {
         }
 
         /*
-         * Keep this exact WebView request alive.
+         * Save the current WebView request.
          */
         pendingWebPermissionRequest = request;
 
@@ -208,38 +204,31 @@ public class VChromeClient extends WebChromeClient {
             @Override
             public void run() {
 
-                /*
-                 * Permission could have been granted between
-                 * the previous check and this point.
-                 */
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                boolean alreadyGranted =
+                        activity.checkSelfPermission(
+                                Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED;
 
-                    boolean alreadyGranted =
-                            activity.checkSelfPermission(
-                                    Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED;
+                if (alreadyGranted) {
 
-                    if (alreadyGranted) {
+                    PermissionRequest pending =
+                            pendingWebPermissionRequest;
 
-                        PermissionRequest pending =
-                                pendingWebPermissionRequest;
+                    pendingWebPermissionRequest = null;
 
-                        pendingWebPermissionRequest = null;
-
-                        if (pending != null) {
-                            grantAudio(pending);
-                        }
-
-                        return;
+                    if (pending != null) {
+                        grantAudio(pending);
                     }
 
-                    activity.requestPermissions(
-                            new String[]{
-                                    Manifest.permission.RECORD_AUDIO
-                            },
-                            RECORD_AUDIO_REQUEST_CODE
-                    );
+                    return;
                 }
+
+                activity.requestPermissions(
+                        new String[]{
+                                Manifest.permission.RECORD_AUDIO
+                        },
+                        RECORD_AUDIO_REQUEST_CODE
+                );
             }
         });
     }
@@ -277,7 +266,8 @@ public class VChromeClient extends WebChromeClient {
     }
 
     /*
-     * MainActivity calls this from onRequestPermissionsResult().
+     * Called by MainActivity after Android finishes
+     * the RECORD_AUDIO permission dialog.
      */
     public void onAndroidPermissionResult(
             int requestCode,
@@ -319,4 +309,4 @@ public class VChromeClient extends WebChromeClient {
             );
         }
     }
-        }
+}
