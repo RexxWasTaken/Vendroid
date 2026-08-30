@@ -1,6 +1,7 @@
 package dev.vendicated.vencord;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -16,10 +17,18 @@ import java.util.Locale;
 
 public class VChromeClient extends WebChromeClient {
 
-    private static final int RECORD_AUDIO_REQUEST_CODE = 4242;
+    /*
+     * IMPORTANT:
+     * MainActivity accesses this constant, so it MUST be public.
+     */
+    public static final int RECORD_AUDIO_REQUEST_CODE = 4242;
 
     private final MainActivity activity;
 
+    /*
+     * Keep the WebView permission request alive while Android
+     * shows the RECORD_AUDIO permission dialog.
+     */
     private PermissionRequest pendingWebPermissionRequest;
 
     public VChromeClient(MainActivity activity) {
@@ -28,7 +37,8 @@ public class VChromeClient extends WebChromeClient {
 
     @Override
     public boolean onConsoleMessage(ConsoleMessage msg) {
-        String m = String.format(
+
+        String message = String.format(
                 Locale.ENGLISH,
                 "[Javascript] %s @ %d: %s",
                 msg.message(),
@@ -37,20 +47,21 @@ public class VChromeClient extends WebChromeClient {
         );
 
         switch (msg.messageLevel()) {
+
             case DEBUG:
-                Logger.d(m);
+                Logger.d(message);
                 break;
 
             case ERROR:
-                Logger.e(m);
+                Logger.e(message);
                 break;
 
             case WARNING:
-                Logger.w(m);
+                Logger.w(message);
                 break;
 
             default:
-                Logger.i(m);
+                Logger.i(message);
                 break;
         }
 
@@ -63,6 +74,7 @@ public class VChromeClient extends WebChromeClient {
             ValueCallback<Uri[]> filePathCallback,
             FileChooserParams fileChooserParams
     ) {
+
         if (activity.filePathCallback != null) {
             activity.filePathCallback.onReceiveValue(null);
         }
@@ -73,12 +85,16 @@ public class VChromeClient extends WebChromeClient {
                 fileChooserParams.createIntent();
 
         try {
+
             activity.startActivityForResult(
                     intent,
                     MainActivity.FILECHOOSER_RESULTCODE
             );
+
         } catch (ActivityNotFoundException ex) {
+
             activity.filePathCallback = null;
+
             return false;
         }
 
@@ -90,16 +106,19 @@ public class VChromeClient extends WebChromeClient {
      * WEBVIEW MICROPHONE PERMISSION
      * ============================================================
      *
-     * Discord uses:
+     * Discord requests microphone through:
      *
-     * navigator.mediaDevices.getUserMedia({ audio: true })
+     * navigator.mediaDevices.getUserMedia({
+     *     audio: true
+     * })
      *
-     * We handle:
-     * 1. Android RECORD_AUDIO permission
-     * 2. WebView RESOURCE_AUDIO_CAPTURE permission
+     * Android RECORD_AUDIO permission and WebView's
+     * RESOURCE_AUDIO_CAPTURE permission are handled here.
      */
     @Override
-    public void onPermissionRequest(final PermissionRequest request) {
+    public void onPermissionRequest(
+            final PermissionRequest request
+    ) {
 
         if (request == null) {
             return;
@@ -110,8 +129,13 @@ public class VChromeClient extends WebChromeClient {
         String[] resources = request.getResources();
 
         if (resources != null) {
+
             for (String resource : resources) {
-                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(
+                        resource
+                )) {
+
                     wantsAudio = true;
                     break;
                 }
@@ -119,94 +143,120 @@ public class VChromeClient extends WebChromeClient {
         }
 
         /*
-         * Do not grant unknown WebView resources.
+         * We only handle microphone permission.
          */
         if (!wantsAudio) {
+
             try {
                 request.deny();
             } catch (Exception ignored) {
             }
+
             return;
         }
 
         /*
-         * Android 6.0+ requires runtime RECORD_AUDIO permission.
+         * Android < 6.0 does not have runtime permissions.
          */
-        boolean androidAudioGranted =
-                Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                        || activity.checkSelfPermission(
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+
+            grantAudio(request);
+
+            return;
+        }
+
+        /*
+         * Check Android RECORD_AUDIO permission.
+         */
+        boolean hasAndroidPermission =
+                activity.checkSelfPermission(
                         Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED;
 
         /*
          * Android permission already granted.
-         * Grant WebView microphone immediately.
+         * Give microphone access directly to WebView.
          */
-        if (androidAudioGranted) {
+        if (hasAndroidPermission) {
+
             grantAudio(request);
+
             return;
         }
 
         /*
-         * Cancel previous pending WebView request.
+         * Cancel any previous pending request.
          */
         if (pendingWebPermissionRequest != null) {
+
             try {
                 pendingWebPermissionRequest.deny();
             } catch (Exception ignored) {
             }
         }
 
+        /*
+         * Keep this exact WebView request alive.
+         */
         pendingWebPermissionRequest = request;
 
         /*
-         * Request Android microphone permission on UI thread.
+         * Ask Android for microphone permission.
          */
         activity.runOnUiThread(new Runnable() {
+
             @Override
             public void run() {
 
-                PermissionRequest pending =
-                        pendingWebPermissionRequest;
-
-                if (pending == null) {
-                    return;
-                }
-
                 /*
-                 * Permission might have been granted while
-                 * this callback was waiting.
+                 * Permission could have been granted between
+                 * the previous check and this point.
                  */
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                        || activity.checkSelfPermission(
-                        Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 
-                    pendingWebPermissionRequest = null;
-                    grantAudio(pending);
-                    return;
+                    boolean alreadyGranted =
+                            activity.checkSelfPermission(
+                                    Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED;
+
+                    if (alreadyGranted) {
+
+                        PermissionRequest pending =
+                                pendingWebPermissionRequest;
+
+                        pendingWebPermissionRequest = null;
+
+                        if (pending != null) {
+                            grantAudio(pending);
+                        }
+
+                        return;
+                    }
+
+                    activity.requestPermissions(
+                            new String[]{
+                                    Manifest.permission.RECORD_AUDIO
+                            },
+                            RECORD_AUDIO_REQUEST_CODE
+                    );
                 }
-
-                activity.requestPermissions(
-                        new String[]{
-                                Manifest.permission.RECORD_AUDIO
-                        },
-                        RECORD_AUDIO_REQUEST_CODE
-                );
             }
         });
     }
 
     /*
-     * Grant ONLY microphone capture to WebView.
+     * Grant microphone capture to WebView.
      */
-    private void grantAudio(PermissionRequest request) {
+    private void grantAudio(
+            PermissionRequest request
+    ) {
 
         if (request == null) {
             return;
         }
 
         try {
+
             request.grant(
                     new String[]{
                             PermissionRequest.RESOURCE_AUDIO_CAPTURE
@@ -219,19 +269,15 @@ public class VChromeClient extends WebChromeClient {
 
         } catch (Exception ex) {
 
-            /*
-             * Logger in this project uses Logger.e(String),
-             * so don't use Logger.e(String, Exception).
-             */
             Logger.e(
-                    "Vendroid: failed to grant microphone: "
-                            + ex.getMessage()
+                    "Vendroid: failed to grant microphone",
+                    ex
             );
         }
     }
 
     /*
-     * MainActivity should forward Android permission result here.
+     * MainActivity calls this from onRequestPermissionsResult().
      */
     public void onAndroidPermissionResult(
             int requestCode,
@@ -273,4 +319,4 @@ public class VChromeClient extends WebChromeClient {
             );
         }
     }
-    }
+        }
