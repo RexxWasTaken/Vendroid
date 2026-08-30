@@ -6,17 +6,22 @@ import android.content.ActivityNotFoundException;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
-import android.webkit.*;
+import android.webkit.ConsoleMessage;
+import android.webkit.FileChooserParams;
+import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebView;
 
 import java.util.Locale;
 
 public class VChromeClient extends WebChromeClient {
 
-    private static final int RECORD_AUDIO_REQUEST_CODE = 4242;
+    public static final int RECORD_AUDIO_REQUEST_CODE = 4242;
 
     private final MainActivity activity;
 
-    private PermissionRequest pendingWebPermissionRequest;
+    private PermissionRequest pendingAudioRequest;
 
     public VChromeClient(MainActivity activity) {
         this.activity = activity;
@@ -25,7 +30,7 @@ public class VChromeClient extends WebChromeClient {
     @Override
     public boolean onConsoleMessage(ConsoleMessage msg) {
 
-        var m = String.format(
+        var message = String.format(
                 Locale.ENGLISH,
                 "[Javascript] %s @ %d: %s",
                 msg.message(),
@@ -34,21 +39,20 @@ public class VChromeClient extends WebChromeClient {
         );
 
         switch (msg.messageLevel()) {
-
             case DEBUG:
-                Logger.d(m);
+                Logger.d(message);
                 break;
 
             case ERROR:
-                Logger.e(m);
+                Logger.e(message);
                 break;
 
             case WARNING:
-                Logger.w(m);
+                Logger.w(message);
                 break;
 
             default:
-                Logger.i(m);
+                Logger.i(message);
                 break;
         }
 
@@ -62,31 +66,54 @@ public class VChromeClient extends WebChromeClient {
             FileChooserParams fileChooserParams
     ) {
 
-        if (activity.filePathCallback != null)
+        if (activity.filePathCallback != null) {
             activity.filePathCallback.onReceiveValue(null);
+        }
 
         activity.filePathCallback = filePathCallback;
 
-        var i = fileChooserParams.createIntent();
+        var intent = fileChooserParams.createIntent();
 
         try {
 
             activity.startActivityForResult(
-                    i,
+                    intent,
                     MainActivity.FILECHOOSER_RESULTCODE
             );
 
         } catch (ActivityNotFoundException ex) {
 
             activity.filePathCallback = null;
+
+            Logger.e(
+                    "No activity found for file chooser",
+                    ex
+            );
+
             return false;
         }
 
         return true;
     }
 
+    /*
+     * Discord/WebView calls this when JavaScript requests:
+     *
+     * navigator.mediaDevices.getUserMedia({
+     *     audio: true
+     * })
+     *
+     * Android has TWO permission layers:
+     *
+     * 1. Android RECORD_AUDIO permission
+     * 2. WebView PermissionRequest
+     *
+     * Both must be granted.
+     */
     @Override
-    public void onPermissionRequest(PermissionRequest request) {
+    public void onPermissionRequest(
+            PermissionRequest request
+    ) {
 
         boolean wantsAudio = false;
 
@@ -98,41 +125,74 @@ public class VChromeClient extends WebChromeClient {
             }
         }
 
-        // Only handle microphone here.
+        /*
+         * Do not automatically grant camera or unknown resources.
+         */
         if (!wantsAudio) {
             request.deny();
             return;
         }
 
-        boolean hasAndroidPermission =
-                Build.VERSION.SDK_INT < 23
-                        || activity.checkSelfPermission(
-                                Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED;
+        activity.runOnUiThread(() -> {
 
-        if (hasAndroidPermission) {
+            if (activity.isFinishing()) {
+                request.deny();
+                return;
+            }
 
-            request.grant(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                    && activity.isDestroyed()) {
+
+                request.deny();
+                return;
+            }
+
+            boolean androidMicGranted =
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                            || activity.checkSelfPermission(
+                                    Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED;
+
+            if (androidMicGranted) {
+
+                grantMicrophone(request);
+
+                return;
+            }
+
+            /*
+             * Keep this WebView request alive while Android displays
+             * the RECORD_AUDIO permission dialog.
+             */
+            if (pendingAudioRequest != null) {
+                pendingAudioRequest.deny();
+            }
+
+            pendingAudioRequest = request;
+
+            activity.requestPermissions(
                     new String[]{
-                            PermissionRequest.RESOURCE_AUDIO_CAPTURE
-                    }
+                            Manifest.permission.RECORD_AUDIO
+                    },
+                    RECORD_AUDIO_REQUEST_CODE
             );
+        });
+    }
 
-            return;
-        }
+    private void grantMicrophone(
+            PermissionRequest request
+    ) {
 
-        // Hold WebView request while Android permission dialog is open.
-        if (pendingWebPermissionRequest != null) {
-            pendingWebPermissionRequest.deny();
-        }
-
-        pendingWebPermissionRequest = request;
-
-        activity.requestPermissions(
+        /*
+         * IMPORTANT:
+         * Only grant AUDIO_CAPTURE.
+         *
+         * Do NOT grant the entire request blindly.
+         */
+        request.grant(
                 new String[]{
-                        Manifest.permission.RECORD_AUDIO
-                },
-                RECORD_AUDIO_REQUEST_CODE
+                        PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                }
         );
     }
 
@@ -141,13 +201,18 @@ public class VChromeClient extends WebChromeClient {
             int[] grantResults
     ) {
 
-        if (requestCode != RECORD_AUDIO_REQUEST_CODE ||
-                pendingWebPermissionRequest == null)
+        if (requestCode != RECORD_AUDIO_REQUEST_CODE) {
             return;
+        }
 
-        var request = pendingWebPermissionRequest;
+        PermissionRequest request =
+                pendingAudioRequest;
 
-        pendingWebPermissionRequest = null;
+        pendingAudioRequest = null;
+
+        if (request == null) {
+            return;
+        }
 
         boolean granted =
                 grantResults.length > 0
@@ -156,11 +221,7 @@ public class VChromeClient extends WebChromeClient {
 
         if (granted) {
 
-            request.grant(
-                    new String[]{
-                            PermissionRequest.RESOURCE_AUDIO_CAPTURE
-                    }
-            );
+            grantMicrophone(request);
 
         } else {
 
