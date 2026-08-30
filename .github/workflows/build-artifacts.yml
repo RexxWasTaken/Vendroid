@@ -1,47 +1,103 @@
-name: Release
+name: Build Vendroid
+
 on:
+  workflow_dispatch:
   push:
-  pull_request:
-    branches: main
+    branches:
+      - main
+
+permissions:
+  contents: write
 
 jobs:
   build:
+    name: Build
     runs-on: ubuntu-latest
-    
+
     steps:
+
+      # -----------------------------
+      # Checkout source
+      # -----------------------------
       - name: Checkout builds
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
+
+      # -----------------------------
+      # Setup JDK 11
+      # FIX:
+      # distribution must be temurin,
+      # NOT adopt
+      # -----------------------------
       - name: Setup JDK 11
-        uses: actions/setup-java@main
+        uses: actions/setup-java@v4
         with:
-          java-version: 11
-          distribution: adopt
+          java-version: '11'
+          distribution: 'temurin'
+          cache: gradle
 
+
+      # -----------------------------
+      # Setup Android SDK
+      # -----------------------------
       - name: Setup Android SDK
-        uses: android-actions/setup-android@7c5672355aaa8fde5f97a91aa9a99616d1ace6bc # v2.0.10
-      
-      - name: Setup credentials
-        run: |
-          base64 -d <<< "$KEYSTORE_BASE64" > $HOME/keystore.jks
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          
-      - name: Build Artifact
-        run: |
-          chmod +x ./gradlew
-          ./gradlew app:assembleRelease \
-            -Pandroid.injected.signing.store.file="$HOME/keystore.jks" \
-            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        uses: android-actions/setup-android@v3
 
-      - uses: actions/upload-artifact@main
+      - name: Install Android SDK 33
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-33"
+          sdkmanager "build-tools;33.0.2"
+
+
+      # -----------------------------
+      # Make Gradle executable
+      # -----------------------------
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+
+      # -----------------------------
+      # Build Debug APK
+      # -----------------------------
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+
+      # -----------------------------
+      # Build Release APK
+      # -----------------------------
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+
+      # -----------------------------
+      # Show generated APKs
+      # -----------------------------
+      - name: List APK files
+        run: |
+          echo "Generated APK files:"
+          find app/build/outputs/apk -type f -name "*.apk" -print
+
+
+      # -----------------------------
+      # Upload Debug APK
+      # -----------------------------
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
         with:
-          name: VencordDev
-          path: app/build/outputs/apk/release/app-release.apk
+          name: Vendroid-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+
+      # -----------------------------
+      # Upload Release APK
+      # -----------------------------
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vendroid-release
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
