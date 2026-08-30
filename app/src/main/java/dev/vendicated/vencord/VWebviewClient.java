@@ -3,14 +3,17 @@ package dev.vendicated.vencord;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.view.View;
-import android.webkit.*;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import androidx.annotation.Nullable;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.*;
+import java.util.HashMap;
 
 public class VWebviewClient extends WebViewClient {
 
@@ -20,20 +23,30 @@ public class VWebviewClient extends WebViewClient {
             WebResourceRequest request
     ) {
 
-        var url = request.getUrl();
+        var url =
+                request.getUrl();
 
-        if ("discord.com".equals(url.getAuthority())
-                || "about:blank".equals(url.toString())) {
+        if (
+                "discord.com".equals(
+                        url.getAuthority()
+                )
+                        || "about:blank".equals(
+                        url.toString()
+                )
+        ) {
 
             return false;
         }
 
-        Intent intent = new Intent(
-                Intent.ACTION_VIEW,
-                url
-        );
+        Intent intent =
+                new Intent(
+                        Intent.ACTION_VIEW,
+                        url
+                );
 
-        view.getContext().startActivity(intent);
+        view.getContext().startActivity(
+                intent
+        );
 
         return true;
     }
@@ -45,22 +58,26 @@ public class VWebviewClient extends WebViewClient {
             Bitmap favicon
     ) {
 
-        // Desktop script FIRST
-        view.evaluateJavascript(
-                HttpClient.VendroidDesktopRuntime,
-                null
-        );
+        /*
+         * IMPORTANT:
+         *
+         * Desktop detection has to be injected first.
+         */
+        if (
+                HttpClient.VendroidDesktopRuntime
+                        != null
+        ) {
 
-        // Vencord runtime
-        view.evaluateJavascript(
-                HttpClient.VencordRuntime,
-                null
-        );
+            view.evaluateJavascript(
+                    HttpClient.VendroidDesktopRuntime,
+                    null
+            );
+        }
 
-        // Existing mobile runtime
-        view.evaluateJavascript(
-                HttpClient.VencordMobileRuntime,
-                null
+        super.onPageStarted(
+                view,
+                url,
+                favicon
         );
     }
 
@@ -70,23 +87,106 @@ public class VWebviewClient extends WebViewClient {
             String url
     ) {
 
-        view.setVisibility(View.VISIBLE);
+        /*
+         * Wait until Discord's document is actually loaded.
+         *
+         * Then load in strict order:
+         *
+         * 1. Vencord
+         * 2. Vendroid mobile runtime
+         * 3. EVERY custom plugin
+         */
+        loadVencordChain(view);
 
-        // Custom plugins load separately.
-        for (String script : HttpClient.CustomPluginScripts) {
+        view.setVisibility(
+                View.VISIBLE
+        );
+
+        super.onPageFinished(
+                view,
+                url
+        );
+    }
+
+    private void loadVencordChain(
+            WebView view
+    ) {
+
+        /*
+         * STEP 1
+         * Vencord main runtime
+         */
+        if (
+                HttpClient.VencordRuntime
+                        == null
+        ) {
+
+            Logger.e(
+                    "VencordRuntime is null"
+            );
+
+            return;
+        }
+
+        view.evaluateJavascript(
+                HttpClient.VencordRuntime,
+                result -> {
+
+                    /*
+                     * STEP 2
+                     * Existing Vendroid/Vencord mobile runtime.
+                     */
+                    if (
+                            HttpClient.VencordMobileRuntime
+                                    != null
+                    ) {
+
+                        view.evaluateJavascript(
+                                HttpClient.VencordMobileRuntime,
+                                mobileResult ->
+                                        loadCustomPlugins(view)
+                        );
+
+                    } else {
+
+                        loadCustomPlugins(view);
+                    }
+                }
+        );
+    }
+
+    private void loadCustomPlugins(
+            WebView view
+    ) {
+
+        /*
+         * Every custom plugin is executed independently.
+         *
+         * If StereoLoudMic crashes, another plugin still gets
+         * its chance to load.
+         */
+        for (
+                String script :
+                HttpClient.CustomPluginScripts
+        ) {
 
             String wrapped =
-                    "(function(){try{\n"
+                    "(function(){"
+                            + "try{"
                             + script
-                            + "\n}catch(e){console.error('[Vendroid custom plugin error]',e);}})();";
+                            + "}catch(e){"
+                            + "console.error("
+                            + "'[Vendroid custom plugin error]',"
+                            + "e"
+                            + ");"
+                            + "}"
+                            + "})();";
 
             view.evaluateJavascript(
                     wrapped,
                     null
             );
         }
-
-        super.onPageFinished(view, url);
     }
 
     @Nullable
@@ -96,10 +196,21 @@ public class VWebviewClient extends WebViewClient {
             WebResourceRequest req
     ) {
 
-        var uri = req.getUrl();
+        var uri =
+                req.getUrl();
 
-        if (req.isForMainFrame()
-                || req.getUrl().getPath().endsWith(".css")) {
+        String path =
+                uri.getPath();
+
+        if (
+                req.isForMainFrame()
+                        || (
+                        path != null
+                                && path.endsWith(
+                                ".css"
+                        )
+                )
+        ) {
 
             try {
 
@@ -121,36 +232,59 @@ public class VWebviewClient extends WebViewClient {
             WebResourceRequest req
     ) throws IOException {
 
-        var url = req.getUrl().toString();
+        var url =
+                req.getUrl()
+                        .toString();
 
         var conn =
                 (HttpURLConnection)
-                        new URL(url).openConnection();
+                        new URL(url)
+                                .openConnection();
 
-        conn.setRequestMethod(req.getMethod());
+        conn.setRequestMethod(
+                req.getMethod()
+        );
 
-        for (var h : req.getRequestHeaders().entrySet()) {
+        for (
+                var header :
+                req.getRequestHeaders()
+                        .entrySet()
+        ) {
 
             conn.setRequestProperty(
-                    h.getKey(),
-                    h.getValue()
+                    header.getKey(),
+                    header.getValue()
             );
         }
 
-        var code = conn.getResponseCode();
-        var msg = conn.getResponseMessage();
+        var code =
+                conn.getResponseCode();
 
-        var headers = conn.getHeaderFields();
+        var msg =
+                conn.getResponseMessage();
+
+        var headers =
+                conn.getHeaderFields();
 
         var modifiedHeaders =
                 new HashMap<String, String>(
                         headers.size()
                 );
 
-        for (var header : headers.entrySet()) {
+        for (
+                var header :
+                headers.entrySet()
+        ) {
 
-            if (!"Content-Security-Policy"
-                    .equalsIgnoreCase(header.getKey())) {
+            if (
+                    !"Content-Security-Policy"
+                            .equalsIgnoreCase(
+                                    header.getKey()
+                            )
+                    && header.getKey() != null
+                    && header.getValue() != null
+                    && !header.getValue().isEmpty()
+            ) {
 
                 modifiedHeaders.put(
                         header.getKey(),
@@ -159,17 +293,22 @@ public class VWebviewClient extends WebViewClient {
             }
         }
 
-        if (url.endsWith(".css"))
+        if (url.endsWith(".css")) {
+
             modifiedHeaders.put(
                     "Content-Type",
                     "text/css"
             );
+        }
 
-        return new WebResourceResponse(
+        String contentType =
                 modifiedHeaders.getOrDefault(
                         "Content-Type",
                         "application/octet-stream"
-                ),
+                );
+
+        return new WebResourceResponse(
+                contentType,
                 "utf-8",
                 code,
                 msg,
