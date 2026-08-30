@@ -396,4 +396,4 @@ public class MainActivity extends Activity {
             handleUrl(data);
         }
     }
-}
+    }
