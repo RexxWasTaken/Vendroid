@@ -4,9 +4,13 @@ import android.app.Activity;
 
 import androidx.annotation.NonNull;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class HttpClient {
@@ -15,9 +19,12 @@ public class HttpClient {
             extends IOException {
 
         private final HttpURLConnection conn;
+
         private String message;
 
-        public HttpException(HttpURLConnection conn) {
+        public HttpException(
+                HttpURLConnection conn
+        ) {
             this.conn = conn;
         }
 
@@ -27,22 +34,28 @@ public class HttpClient {
 
             if (message == null) {
 
-                try (var es = conn.getErrorStream()) {
+                try (
+                        var es =
+                                conn.getErrorStream()
+                ) {
 
-                    message = String.format(
-                            Locale.ENGLISH,
-                            "%d: %s (%s)\n%s",
-                            conn.getResponseCode(),
-                            conn.getResponseMessage(),
-                            conn.getURL().toString(),
-                            readAsText(es)
-                    );
+                    message =
+                            String.format(
+                                    Locale.ENGLISH,
+                                    "%d: %s (%s)\n%s",
+                                    conn.getResponseCode(),
+                                    conn.getResponseMessage(),
+                                    conn.getURL()
+                                            .toString(),
+                                    readAsText(es)
+                            );
 
                 } catch (IOException ex) {
 
                     message =
-                            "Error while building message lmao. Url is "
-                                    + conn.getURL().toString();
+                            "Error while building message. Url is "
+                                    + conn.getURL()
+                                    .toString();
                 }
             }
 
@@ -51,13 +64,30 @@ public class HttpClient {
     }
 
     public static String VencordRuntime;
+
     public static String VencordMobileRuntime;
+
     public static String VendroidDesktopRuntime;
 
-    public static final java.util.List<String>
+    /*
+     * ALL bundled custom plugins.
+     *
+     * Example:
+     *
+     * app/src/main/assets/vencord/custom/
+     *     StereoLoudMic.js
+     *     Plugin2.js
+     *     Plugin3.js
+     */
+    public static final List<String>
             CustomPluginScripts =
-            new java.util.ArrayList<>();
+            new ArrayList<>();
 
+    /*
+     * IMPORTANT:
+     *
+     * This directory must NOT be changed.
+     */
     private static final String
             CUSTOM_PLUGIN_ASSET_DIR =
             "vencord/custom";
@@ -66,35 +96,65 @@ public class HttpClient {
             Activity activity
     ) throws IOException {
 
-        if (VencordRuntime != null)
+        /*
+         * Already loaded.
+         */
+        if (VencordRuntime != null) {
             return;
+        }
 
-        var res = activity.getResources();
+        var res =
+                activity.getResources();
 
-        try (var is =
-                     res.openRawResource(
-                             R.raw.vencord_mobile
-                     )) {
+        /*
+         * Vendroid mobile runtime.
+         */
+        try (
+                var is =
+                        res.openRawResource(
+                                R.raw.vencord_mobile
+                        )
+        ) {
 
             VencordMobileRuntime =
                     readAsText(is);
         }
 
-        try (var is =
-                     res.openRawResource(
-                             R.raw.vendroid_desktop
-                     )) {
+        /*
+         * Desktop detection / scaling.
+         */
+        try (
+                var is =
+                        res.openRawResource(
+                                R.raw.vendroid_desktop
+                        )
+        ) {
 
             VendroidDesktopRuntime =
                     readAsText(is);
         }
 
+        /*
+         * LOAD EVERY LOCAL CUSTOM PLUGIN.
+         *
+         * This happens before the remote Vencord bundle is
+         * downloaded, but the actual JavaScript execution happens
+         * later in VWebviewClient AFTER Vencord is initialized.
+         */
         loadCustomPlugins(activity);
 
+        /*
+         * Download/load the normal Vencord browser bundle.
+         */
         var conn =
-                fetch(Constants.JS_BUNDLE_URL);
+                fetch(
+                        Constants.JS_BUNDLE_URL
+                );
 
-        try (var is = conn.getInputStream()) {
+        try (
+                var is =
+                        conn.getInputStream()
+        ) {
 
             VencordRuntime =
                     readAsText(is);
@@ -129,29 +189,66 @@ public class HttpClient {
             return;
         }
 
-        if (files == null)
+        if (files == null) {
+            Logger.w(
+                    "No custom plugin directory found: "
+                            + CUSTOM_PLUGIN_ASSET_DIR
+            );
+
             return;
+        }
 
         for (String file : files) {
 
-            if (!file.endsWith(".js"))
+            /*
+             * Only JS files.
+             */
+            if (
+                    file == null
+                            || !file.toLowerCase(
+                            Locale.ENGLISH
+                    ).endsWith(".js")
+            ) {
                 continue;
+            }
+
+            String assetPath =
+                    CUSTOM_PLUGIN_ASSET_DIR
+                            + "/"
+                            + file;
 
             try (
                     var is =
                             assets.open(
-                                    CUSTOM_PLUGIN_ASSET_DIR
-                                            + "/"
-                                            + file
+                                    assetPath
                             )
             ) {
 
-                CustomPluginScripts.add(
-                        readAsText(is)
-                );
+                String script =
+                        readAsText(is);
+
+                if (
+                        script != null
+                                && !script.trim()
+                                .isEmpty()
+                ) {
+
+                    CustomPluginScripts.add(
+                            script
+                    );
+
+                    Logger.i(
+                            "Loaded custom plugin: "
+                                    + file
+                    );
+                }
 
             } catch (IOException ex) {
 
+                /*
+                 * One broken plugin must NOT stop the
+                 * remaining plugins.
+                 */
                 Logger.e(
                         "Failed to read custom plugin: "
                                 + file,
@@ -159,6 +256,11 @@ public class HttpClient {
                 );
             }
         }
+
+        Logger.i(
+                "Custom plugins loaded: "
+                        + CustomPluginScripts.size()
+        );
     }
 
     private static HttpURLConnection fetch(
@@ -167,10 +269,17 @@ public class HttpClient {
 
         var conn =
                 (HttpURLConnection)
-                        new URL(url).openConnection();
+                        new URL(url)
+                                .openConnection();
 
-        if (conn.getResponseCode() >= 300) {
-            throw new HttpException(conn);
+        if (
+                conn.getResponseCode()
+                        >= 300
+        ) {
+
+            throw new HttpException(
+                    conn
+            );
         }
 
         return conn;
@@ -180,18 +289,27 @@ public class HttpClient {
             InputStream is
     ) throws IOException {
 
-        try (var baos =
-                     new ByteArrayOutputStream()) {
+        if (is == null) {
+            return "";
+        }
+
+        try (
+                var baos =
+                        new ByteArrayOutputStream()
+        ) {
 
             int n;
 
-            byte[] buf =
+            byte[] buffer =
                     new byte[16384];
 
-            while ((n = is.read(buf)) > -1) {
+            while (
+                    (n = is.read(buffer))
+                            > -1
+            ) {
 
                 baos.write(
-                        buf,
+                        buffer,
                         0,
                         n
                 );
@@ -199,7 +317,9 @@ public class HttpClient {
 
             baos.flush();
 
-            return baos.toString("UTF-8");
+            return baos.toString(
+                    "UTF-8"
+            );
         }
     }
 }
