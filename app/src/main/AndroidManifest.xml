@@ -4,11 +4,17 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Internet for Discord/Vencord -->
     <uses-permission
         android:name="android.permission.INTERNET" />
 
+    <!-- REQUIRED FOR MICROPHONE -->
     <uses-permission
         android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Audio routing support -->
+    <uses-permission
+        android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <uses-feature
         android:name="android.hardware.microphone"
@@ -51,14 +57,23 @@
                 <category
                     android:name="android.intent.category.DEFAULT" />
 
-                <data android:scheme="https" />
-                <data android:scheme="http" />
+                <data
+                    android:scheme="https" />
 
-                <data android:host="discord.com" />
-                <data android:host="*.discord.com" />
+                <data
+                    android:scheme="http" />
 
-                <data android:host="discordapp.com" />
-                <data android:host="*.discordapp.com" />
+                <data
+                    android:host="discord.com" />
+
+                <data
+                    android:host="*.discord.com" />
+
+                <data
+                    android:host="discordapp.com" />
+
+                <data
+                    android:host="*.discordapp.com" />
 
             </intent-filter>
 
