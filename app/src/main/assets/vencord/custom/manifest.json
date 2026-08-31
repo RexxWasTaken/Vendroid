@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Rexx's Hook v7.4 Max Loud",
+  "version": "7.4.0",
+  "description": "Stable extreme-gain audio hook.",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://discord.com/*",
+        "*://discordapp.com/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
