@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Rexx's Hook v7.3",
+  "version": "7.3.0",
+  "description": "Loads the supplied Rexx audio hook at document start.",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://discord.com/*",
+        "*://discordapp.com/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
