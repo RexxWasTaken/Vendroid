@@ -19,7 +19,6 @@ public class HttpClient {
             extends IOException {
 
         private final HttpURLConnection conn;
-
         private String message;
 
         public HttpException(
@@ -35,27 +34,23 @@ public class HttpClient {
             if (message == null) {
 
                 try (
-                        var es =
-                                conn.getErrorStream()
+                        var es = conn.getErrorStream()
                 ) {
 
-                    message =
-                            String.format(
-                                    Locale.ENGLISH,
-                                    "%d: %s (%s)\n%s",
-                                    conn.getResponseCode(),
-                                    conn.getResponseMessage(),
-                                    conn.getURL()
-                                            .toString(),
-                                    readAsText(es)
-                            );
+                    message = String.format(
+                            Locale.ENGLISH,
+                            "%d: %s (%s)\n%s",
+                            conn.getResponseCode(),
+                            conn.getResponseMessage(),
+                            conn.getURL().toString(),
+                            readAsText(es)
+                    );
 
                 } catch (IOException ex) {
 
                     message =
                             "Error while building message. Url is "
-                                    + conn.getURL()
-                                    .toString();
+                                    + conn.getURL().toString();
                 }
             }
 
@@ -63,31 +58,31 @@ public class HttpClient {
         }
     }
 
+    /*
+     * COMPLETE Vencord browser.js bundle.
+     *
+     * The downloaded JavaScript is kept in RAM.
+     * It is NOT written to a local .js file.
+     */
     public static String VencordRuntime;
 
+    /*
+     * Existing Vendroid mobile glue runtime.
+     */
     public static String VencordMobileRuntime;
 
+    /*
+     * Existing desktop detection/scaling runtime.
+     */
     public static String VendroidDesktopRuntime;
 
     /*
-     * ALL bundled custom plugins.
-     *
-     * Example:
-     *
-     * app/src/main/assets/vencord/custom/
-     *     StereoLoudMic.js
-     *     Plugin2.js
-     *     Plugin3.js
+     * Locally bundled custom plugins.
      */
     public static final List<String>
             CustomPluginScripts =
             new ArrayList<>();
 
-    /*
-     * IMPORTANT:
-     *
-     * This directory must NOT be changed.
-     */
     private static final String
             CUSTOM_PLUGIN_ASSET_DIR =
             "vencord/custom";
@@ -97,7 +92,7 @@ public class HttpClient {
     ) throws IOException {
 
         /*
-         * Already loaded.
+         * Don't download the same bundle twice.
          */
         if (VencordRuntime != null) {
             return;
@@ -107,7 +102,7 @@ public class HttpClient {
                 activity.getResources();
 
         /*
-         * Vendroid mobile runtime.
+         * Load the existing mobile runtime.
          */
         try (
                 var is =
@@ -121,7 +116,7 @@ public class HttpClient {
         }
 
         /*
-         * Desktop detection / scaling.
+         * Load the existing desktop runtime.
          */
         try (
                 var is =
@@ -135,16 +130,21 @@ public class HttpClient {
         }
 
         /*
-         * LOAD EVERY LOCAL CUSTOM PLUGIN.
+         * Load local custom plugins.
          *
-         * This happens before the remote Vencord bundle is
-         * downloaded, but the actual JavaScript execution happens
-         * later in VWebviewClient AFTER Vencord is initialized.
+         * This does NOT modify Vencord's own bundle.
          */
         loadCustomPlugins(activity);
 
         /*
-         * Download/load the normal Vencord browser bundle.
+         * Download the COMPLETE official Vencord browser bundle.
+         *
+         * URL:
+         *
+         * https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.js
+         *
+         * The response is stored directly in VencordRuntime.
+         * Nothing is saved to disk.
          */
         var conn =
                 fetch(
@@ -190,6 +190,7 @@ public class HttpClient {
         }
 
         if (files == null) {
+
             Logger.w(
                     "No custom plugin directory found: "
                             + CUSTOM_PLUGIN_ASSET_DIR
@@ -200,9 +201,6 @@ public class HttpClient {
 
         for (String file : files) {
 
-            /*
-             * Only JS files.
-             */
             if (
                     file == null
                             || !file.toLowerCase(
@@ -245,10 +243,6 @@ public class HttpClient {
 
             } catch (IOException ex) {
 
-                /*
-                 * One broken plugin must NOT stop the
-                 * remaining plugins.
-                 */
                 Logger.e(
                         "Failed to read custom plugin: "
                                 + file,
