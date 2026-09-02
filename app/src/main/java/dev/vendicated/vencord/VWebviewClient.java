@@ -59,7 +59,7 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * Existing desktop runtime.
+         * 1. Desktop runtime
          */
         if (
                 HttpClient.VendroidDesktopRuntime
@@ -71,6 +71,22 @@ public class VWebviewClient extends WebViewClient {
                     null
             );
         }
+
+        /*
+         * 2. COMPLETE Vencord bundle
+         *
+         * IMPORTANT:
+         * This is intentionally loaded in onPageStarted(),
+         * matching the OG Vendroid behavior.
+         *
+         * VencordRuntime contains the complete browser.js
+         * downloaded from:
+         *
+         * https://github.com/Vendicated/Vencord/releases/download/devbuild/browser.js
+         *
+         * It is NOT a local file.
+         */
+        loadVencordChain(view);
 
         super.onPageStarted(
                 view,
@@ -86,14 +102,11 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * Loading order:
+         * Vencord has already been injected from
+         * onPageStarted().
          *
-         * 1. Complete Vencord browser.js
-         * 2. Existing mobile runtime
-         * 3. Existing local custom plugins
+         * Do NOT inject it again here.
          */
-        loadVencordChain(view);
-
         view.setVisibility(
                 View.VISIBLE
         );
@@ -130,7 +143,8 @@ public class VWebviewClient extends WebViewClient {
 
                     /*
                      * STEP 2:
-                     * Existing Vendroid mobile runtime.
+                     * Existing Vencord/Vendroid mobile
+                     * runtime.
                      */
                     if (
                             HttpClient.VencordMobileRuntime
@@ -156,9 +170,12 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * Execute each local custom plugin independently.
+         * EXISTING CUSTOM PLUGIN LOADER.
          *
-         * This is additive and does not replace Vencord.
+         * UNCHANGED.
+         *
+         * Every custom plugin runs after Vencord
+         * and the mobile runtime.
          */
         for (
                 String script :
