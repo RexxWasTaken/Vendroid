@@ -59,9 +59,7 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * IMPORTANT:
-         *
-         * Desktop detection has to be injected first.
+         * Existing desktop runtime.
          */
         if (
                 HttpClient.VendroidDesktopRuntime
@@ -88,13 +86,11 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * Wait until Discord's document is actually loaded.
+         * Loading order:
          *
-         * Then load in strict order:
-         *
-         * 1. Vencord
-         * 2. Vendroid mobile runtime
-         * 3. EVERY custom plugin
+         * 1. Complete Vencord browser.js
+         * 2. Existing mobile runtime
+         * 3. Existing local custom plugins
          */
         loadVencordChain(view);
 
@@ -113,8 +109,8 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * STEP 1
-         * Vencord main runtime
+         * STEP 1:
+         * Execute the complete downloaded Vencord bundle.
          */
         if (
                 HttpClient.VencordRuntime
@@ -133,8 +129,8 @@ public class VWebviewClient extends WebViewClient {
                 result -> {
 
                     /*
-                     * STEP 2
-                     * Existing Vendroid/Vencord mobile runtime.
+                     * STEP 2:
+                     * Existing Vendroid mobile runtime.
                      */
                     if (
                             HttpClient.VencordMobileRuntime
@@ -160,10 +156,9 @@ public class VWebviewClient extends WebViewClient {
     ) {
 
         /*
-         * Every custom plugin is executed independently.
+         * Execute each local custom plugin independently.
          *
-         * If StereoLoudMic crashes, another plugin still gets
-         * its chance to load.
+         * This is additive and does not replace Vencord.
          */
         for (
                 String script :
