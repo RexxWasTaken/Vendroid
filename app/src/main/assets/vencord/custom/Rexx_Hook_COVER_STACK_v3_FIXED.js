@@ -17,7 +17,7 @@
 
        Mic -> REXX COVER -> Discord
 
- v4 FIX NOTES (this build):
+ v5 FIX NOTES (smooth audio build):
    - v3 shipped with a broken UI: it referenced a state object `S`,
      `makeEngine()` and an `engines` array that were never defined
      anywhere in the file. The ⚡ button rendered but did nothing,
@@ -166,7 +166,7 @@
     const curve = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const x = (i * 2) / n - 1;
-      curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6);
+      curve[i] = Math.tanh(x * 1.12) / Math.tanh(1.12);
     }
     return curve;
   }
@@ -277,18 +277,18 @@
     ultraGain.gain.value = 1;
 
     const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = 0;
-    compressor.knee.value = 6;
+    compressor.threshold.value = -12;
+    compressor.knee.value = 18;
     compressor.ratio.value = 1;
-    compressor.attack.value = 0.02;
-    compressor.release.value = 0.15;
+    compressor.attack.value = 0.008;
+    compressor.release.value = 0.25;
 
     const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -0.3;
-    limiter.knee.value = 0;
-    limiter.ratio.value = 1;   // 1 = transparent until update() runs; was hardcoded 20 (bug)
-    limiter.attack.value = 0.001;
-    limiter.release.value = 0.08;
+    limiter.threshold.value = -1;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 1;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.22;
 
     const safetyShaper = ctx.createWaveShaper();
     safetyShaper.curve = safetyCurve();
@@ -415,10 +415,10 @@
 
       // Compressor: threshold/ratio from comp amount, timing from attack/release
       const compAmt = pct(S.comp);
-      safeSetTarget(compressor.threshold, -1 - compAmt * 39, ctx);
-      safeSetTarget(compressor.ratio, 1 + compAmt * 11, ctx);
-      safeSetValue(compressor.attack, 0.001 + pct(S.attack) * 0.099);
-      safeSetValue(compressor.release, 0.01 + pct(S.release) * 0.99);
+      safeSetTarget(compressor.threshold, -6 - compAmt * 30, ctx, 0.04);
+      safeSetTarget(compressor.ratio, 1 + compAmt * 7, ctx, 0.04);
+      safeSetValue(compressor.attack, 0.003 + pct(S.attack) * 0.047);
+      safeSetValue(compressor.release, 0.08 + pct(S.release) * 0.72);
 
       // Limiter: brickwall ceiling, fixed fast timing for safety.
       // Ratio now scales with the slider too (was hardcoded to 20 before —
@@ -426,8 +426,10 @@
       // clamping every peak above -1dB, which is what caused the
       // frequent audible cutting during normal speech).
       const limitAmt = pct(S.limit);
-      safeSetTarget(limiter.threshold, -0.3 - limitAmt * 23.7, ctx);
-      safeSetTarget(limiter.ratio, 1 + limitAmt * 19, ctx);
+      safeSetTarget(limiter.threshold, -1.0 - limitAmt * 7.0, ctx, 0.06);
+      safeSetTarget(limiter.ratio, 1 + limitAmt * 9, ctx, 0.06);
+      safeSetValue(limiter.attack, 0.003);
+      safeSetValue(limiter.release, 0.18 + limitAmt * 0.22);
 
       // Stereo Width: 0 = transparent (no delay diff), 100 = wide
       safeSetTarget(widenDelay.delayTime, pct(S.width) * 0.012, ctx);
@@ -479,7 +481,7 @@
           // (that flapping is what produces audible "cut, back, cut" chatter).
           const closeDb = -60 + gateAmt * 48;
           const openDb = closeDb + 6; // must rise 6dB above the close point to re-open
-          const floor = 1 - gateAmt * 0.9; // never fully mutes -> mic stays alive
+          const floor = 1 - gateAmt * 0.55; // never fully mutes -> mic stays alive
           const now = performance.now ? performance.now() : Date.now();
 
           if (gateIsOpen) {
@@ -489,7 +491,7 @@
           } else {
             if (db > openDb) {
               gateIsOpen = true;
-              gateHoldUntil = now + 80; // brief hold before it can re-close
+              gateHoldUntil = now + 180; // brief hold before it can re-close
             }
           }
 
@@ -497,7 +499,7 @@
           const tc = target < gateGain.gain.value ? (0.01 + pct(S.attack) * 0.03) : (0.02 + pct(S.release) * 0.15);
           safeSetTarget(gateGain.gain, target, ctx, tc);
         } catch (_) {}
-      }, 30);
+      }, 50);
     } catch (_) {}
 
     /* ============================================================
@@ -565,7 +567,7 @@
     Object.defineProperty(coverGetUserMedia, "__REXX_COVER_UPSTREAM__", { value: current });
 
     try {
-      md.getUserMedia = coverGetUserMedia;
+      md.getUserMedia = coverGetUser;
     } catch (_) {
       try {
         Object.defineProperty(md, "getUserMedia", {
@@ -774,5 +776,5 @@
     if (++tries > 40) clearInterval(uiRetry);
   }, 500);
 
-  console.log("[REXX COVER v4] loaded — real DSP wired, above Rexx Hook");
+  console.log("[REXX COVER v5] loaded — smooth dynamics / anti-cut DSP, above Rexx Hook");
 })();
