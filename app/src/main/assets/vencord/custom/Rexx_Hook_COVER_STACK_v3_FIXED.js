@@ -122,7 +122,7 @@
  width:50px!important;height:50px!important;border-radius:50%!important;
  border:1px solid rgba(255,255,255,.16)!important;
  background:#10121a!important;color:#fff!important;
- z-index:2147483647!important;cursor:pointer!important;
+ z-index:2147483647!important;cursor:pointer!important;pointer-events:auto!important;touch-action:manipulation!important;
  font:700 22px Arial!important;
  box-shadow:0 8px 30px #0009!important;
 }
@@ -193,6 +193,8 @@
       <div class="rc-status" id="rc-status">POST-LAYER READY • waiting for mic</div>
     `;
 
+    box.setAttribute("aria-hidden", "true");
+    box.style.setProperty("pointer-events", "none", "important");
     document.body.appendChild(box);
     const controls = box.querySelector("#rc-controls");
 
@@ -216,10 +218,24 @@
       controls.appendChild(row);
     });
 
-    fab.onclick = () => {
-      box.style.display = box.style.display === "none" ? "block" : "none";
+    const togglePanel = (ev) => {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      const hidden = box.style.display === "none" || getComputedStyle(box).display === "none";
+      box.style.setProperty("display", hidden ? "block" : "none", "important");
+      box.style.setProperty("pointer-events", hidden ? "auto" : "none", "important");
+      if (hidden) {
+        box.scrollTop = 0;
+        box.setAttribute("aria-hidden", "false");
+      } else {
+        box.setAttribute("aria-hidden", "true");
+      }
     };
+    fab.addEventListener("click", togglePanel, true);
+    fab.addEventListener("touchend", togglePanel, true);
+    fab.addEventListener("pointerup", togglePanel, true);
 
+    box.addEventListener("click", e => e.stopPropagation(), true);
+    box.addEventListener("pointerdown", e => e.stopPropagation(), true);
     box.querySelector("#rc-on").onclick = () => {
       S.enabled = !S.enabled;
       box.querySelector("#rc-on").textContent = S.enabled ? "ON" : "BYPASS";
@@ -259,5 +275,5 @@
     if (++tries > 40) clearInterval(uiRetry);
   }, 500);
 
-  console.log("[REXX COVER v2] loaded — serial post-layer, stack-safe");
+  console.log("[REXX COVER v3 FIXED UI] loaded — click/touch panel fixed");
 })();
