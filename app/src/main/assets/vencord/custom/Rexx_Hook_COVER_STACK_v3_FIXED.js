@@ -352,10 +352,31 @@
     exciterSum.connect(warmthShaper);
     warmthShaper.connect(satShaper);
     satShaper.connect(softClipShaper);
+    const dynOut = ctx.createGain();
+    dynOut.gain.value = 1;
     softClipShaper.connect(ultraGain);
-    ultraGain.connect(compressor);
-    compressor.connect(limiter);
-    limiter.connect(safetyShaper);
+
+    let dynProcessed = false; // starts bypassed since comp=0, limit=0 by default
+    function setDynamicsBypass(shouldProcess) {
+      if (shouldProcess === dynProcessed) return;
+      try {
+        if (shouldProcess) {
+          ultraGain.disconnect(dynOut);
+          ultraGain.connect(compressor);
+          compressor.connect(limiter);
+          limiter.connect(dynOut);
+        } else {
+          try { ultraGain.disconnect(compressor); } catch (_) {}
+          try { compressor.disconnect(limiter); } catch (_) {}
+          try { limiter.disconnect(dynOut); } catch (_) {}
+          ultraGain.connect(dynOut);
+        }
+      } catch (_) {}
+      dynProcessed = shouldProcess;
+    }
+    // start bypassed: direct passthrough, zero DynamicsCompressorNode CPU cost
+    ultraGain.connect(dynOut);
+    dynOut.connect(safetyShaper);
 
     // stereo widener (mono-safe: width 0 => L===R, fully transparent)
     safetyShaper.connect(leftGain);
@@ -438,6 +459,12 @@
       const limitAmt = pct(S.limit);
       safeSetTarget(limiter.threshold, -0.3 - limitAmt * 23.7, ctx);
       safeSetTarget(limiter.ratio, 1 + limitAmt * 19, ctx);
+
+      // Only route audio through the two DynamicsCompressorNodes when at
+      // least one of them is actually turned on. At default (both 0%) this
+      // removes their processing cost entirely instead of running them
+      // silently at "no-op" settings.
+      setDynamicsBypass(compAmt > 0 || limitAmt > 0);
 
       // Stereo Width: 0 = transparent (no delay diff), 100 = wide
       safeSetTarget(widenDelay.delayTime, pct(S.width) * 0.012, ctx);
@@ -527,6 +554,7 @@
     }
 
     try {
+     
       inputStream.getAudioTracks().forEach(t => {
         t.addEventListener("ended", destroy, { once: true });
       });
@@ -561,7 +589,7 @@
         // installed, its processed/loud stream arrives here as INPUT.
         upstreamStream = await upstream(constraints);
       } catch (err) {
-        console.warn("[REXX COVER]upstream GUM failed", err);
+        console.warn("[REXX COVER] upstream GUM failed", err);
         throw err;
       }
 
