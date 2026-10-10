@@ -15,6 +15,7 @@ import android.webkit.WebView;
 import android.webkit.PermissionRequest;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 
 public class MainActivity extends Activity {
@@ -82,6 +83,7 @@ public class MainActivity extends Activity {
         if (request == null) return;
         Uri origin = request.getOrigin();
         String host = origin == null ? null : origin.getHost();
+        Logger.i("Web permission request: origin=" + origin + " resources=" + Arrays.toString(request.getResources()));
         boolean trustedOrigin = origin != null && "https".equalsIgnoreCase(origin.getScheme())
                 && ("discord.com".equalsIgnoreCase(host)
                 || "ptb.discord.com".equalsIgnoreCase(host)
@@ -91,6 +93,7 @@ public class MainActivity extends Activity {
             if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) audioRequested = true;
         }
         if (!trustedOrigin || !audioRequested) {
+            Logger.w("Denied WebView permission request: untrusted origin or no audio resource");
             request.deny();
             return;
         }
@@ -118,6 +121,7 @@ public class MainActivity extends Activity {
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
         } else {
+            Logger.w("Android microphone permission was denied");
             request.deny();
         }
     }

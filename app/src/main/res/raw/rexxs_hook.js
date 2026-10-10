@@ -4,7 +4,14 @@
 ════════════════════════════════════════════════════════════════ */
 (function(){
 'use strict';
-if(window.__REXXCORD__)return;
+if(window.__REXXCORD__){
+  if(typeof window.__REXXCORD_ENSURE_UI__==='function'){
+    window.__REXXCORD_ENSURE_UI__();
+    return;
+  }
+  if(document.getElementById('rc-fab'))return;
+  window.__REXXCORD__=false;
+}
 window.__REXXCORD__=true;
 
 /* ─── STATE ──────────────────────────────────────────────────── */
@@ -682,48 +689,89 @@ self.node.connect(dest);
 };
 
 /* ─── AUDIO PATCHES ───────────────────────────────────────────── */
-var _NAC=window.AudioContext||window.webkitAudioContext;
-if(_NAC){
-  window.AudioContext=function(o){
-    var ctx=new _NAC(Object.assign({latencyHint:'interactive',sampleRate:48000},o||{}));
-    if(!window.__RexxCtx)window.__RexxCtx=ctx;
-    return ctx;
-  };
-  window.AudioContext.prototype=_NAC.prototype;
-  if(window.webkitAudioContext)window.webkitAudioContext=window.AudioContext;
+function getRexxAudioContext(){
+  if(window.__RexxCtx&&window.__RexxCtx.state!=='closed')return window.__RexxCtx;
+  var Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx)throw new Error('Web Audio is not supported by this WebView');
+  var ctx;
+  try{ctx=new Ctx({latencyHint:'interactive'});}
+  catch(e){ctx=new Ctx();}
+  window.__RexxCtx=ctx;
+  return ctx;
 }
-var _gum=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-navigator.mediaDevices.getUserMedia=function(c){
-  if(!c||!c.audio)return _gum(c);
-  var audioConstraints=typeof c.audio==='object'?c.audio:{};
-  var processedConstraints=Object.assign({},c,{
-    audio:Object.assign({},audioConstraints,{
-      echoCancellation:false,
-      noiseSuppression:false,
-      autoGainControl:false,
-      sampleRate:{ideal:48000},
-      channelCount:{ideal:2}
-    })
-  });
-  var inputStream;
-  return _gum(processedConstraints).then(async function(stream){
-    inputStream=stream;
-    setMicStatus(true);
-    var ctx=window.__RexxCtx||new window.AudioContext({latencyHint:'interactive'});
-    if(ctx.state==='suspended')await ctx.resume();
-    var src=ctx.createMediaStreamSource(stream),dest=ctx.createMediaStreamDestination();
-    try{dest.channelCount=2;}catch(e){}
-    await CHAIN.loadWorklet(ctx,src,dest);
-    var outputTrack=dest.stream.getAudioTracks()[0];
-    if(outputTrack)outputTrack.addEventListener('ended',function(){
-      stream.getTracks().forEach(function(track){track.stop();});
-    },{once:true});
-    return dest.stream;
-  }).catch(function(e){
-    if(inputStream)inputStream.getTracks().forEach(function(track){track.stop();});
-    console.warn('[Rexx gum]',e);setMicStatus(false);throw e;
-  });
-};
+function connectStereoFallback(src,dest,ctx){
+  var split=ctx.createChannelSplitter(2);
+  var merge=ctx.createChannelMerger(2);
+  var delay=ctx.createDelay(0.04);
+  var side=ctx.createGain();
+  var compressor=ctx.createDynamicsCompressor();
+  delay.delayTime.value=0.012;
+  side.gain.value=0.25;
+  compressor.threshold.value=-6;
+  compressor.knee.value=0;
+  compressor.ratio.value=8;
+  compressor.attack.value=0.003;
+  compressor.release.value=0.15;
+  src.connect(split);
+  split.connect(merge,0,0);
+  split.connect(merge,1,1);
+  split.connect(delay,0);
+  delay.connect(side);
+  side.connect(merge,0,1);
+  merge.connect(compressor);
+  compressor.connect(dest);
+}
+var audioDevices=navigator.mediaDevices;
+if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCORD_GUM_PATCHED__){
+  var _gum=audioDevices.getUserMedia.bind(audioDevices);
+  audioDevices.getUserMedia=function(c){
+    if(!c||!c.audio)return _gum(c);
+    var audioConstraints=typeof c.audio==='object'?c.audio:{};
+    var processedConstraints=Object.assign({},c,{
+      audio:Object.assign({},audioConstraints,{
+        echoCancellation:false,
+        noiseSuppression:false,
+        autoGainControl:false,
+        channelCount:{ideal:2}
+      })
+    });
+    var inputStream;
+    return _gum(processedConstraints).then(async function(stream){
+      inputStream=stream;
+      try{
+        var ctx=getRexxAudioContext();
+        if(ctx.state==='suspended')await ctx.resume();
+        var src=ctx.createMediaStreamSource(stream),dest=ctx.createMediaStreamDestination();
+        try{dest.channelCount=2;}catch(e){}
+        try{
+          await CHAIN.loadWorklet(ctx,src,dest);
+        }catch(workletError){
+          try{src.disconnect();}catch(e){}
+          try{if(CHAIN.node)CHAIN.node.disconnect();}catch(e){}
+          console.warn('[Rexx] AudioWorklet unavailable; using stereo Web Audio fallback',workletError);
+          connectStereoFallback(src,dest,ctx);
+          setStatus('STEREO FALLBACK','#f59e0b');
+        }
+        var outputTrack=dest.stream.getAudioTracks()[0];
+        if(outputTrack)outputTrack.addEventListener('ended',function(){
+          stream.getTracks().forEach(function(track){track.stop();});
+          setMicStatus(false);
+        },{once:true});
+        setMicStatus(true);
+        return dest.stream;
+      }catch(e){
+        stream.getTracks().forEach(function(track){track.stop();});
+        throw e;
+      }
+    }).catch(function(e){
+      console.warn('[Rexx gum]',e);
+      setMicStatus(false,e.name||'Mic error');
+      setStatus('MIC ERROR','#f87171');
+      throw e;
+    });
+  };
+  window.__REXXCORD_GUM_PATCHED__=true;
+}
 
 /* ─── HELPERS ─────────────────────────────────────────────────── */
 function setStatus(t,color){var el=document.getElementById('rx-status');if(el){el.textContent=t;el.style.color=color||'#f59e0b';}}
@@ -1039,10 +1087,10 @@ var CSS=`
 
 /* ─── UI HELPERS ──────────────────────────────────────────────── */
 function setStatus(t,color){var el=document.getElementById('rc-status');if(el){el.textContent=t;el.style.color=color||'#f59e0b';}}
-function setMicStatus(on){
+function setMicStatus(on,reason){
   document.querySelectorAll('.rc-mic-dot').forEach(function(d){d.classList.toggle('on',on);});
-  var t=document.getElementById('rc-mictext');if(t)t.textContent=on?'Connected':'Waiting...';
-  var t2=document.getElementById('rc-mictext2');if(t2)t2.textContent=on?'Mic: Connected':'Mic: Waiting';
+  var t=document.getElementById('rc-mictext');if(t)t.textContent=on?'Connected':(reason||'Waiting...');
+  var t2=document.getElementById('rc-mictext2');if(t2)t2.textContent=on?'Mic: Connected':(reason?'Mic: '+reason:'Mic: Waiting');
 }
 
 function mkToggle(id,checked,onChange){
@@ -1458,7 +1506,7 @@ function buildMP3Page(){
     var f=finp.files[0];if(!f)return;
     var rd=new FileReader();
     rd.onload=function(e){
-      var ctx=window.__RexxCtx;if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:48000});
+      var ctx=getRexxAudioContext();
       ctx.decodeAudioData(e.target.result.slice(0),function(buf){
         mp3State.buf=buf;info.textContent='🎵 '+f.name+' — '+buf.duration.toFixed(1)+'s';
         info.style.display='block';zone.style.display='none';
@@ -1772,6 +1820,7 @@ function buildGainRackPage(){
 
 /* ─── MAIN UI ──────────────────────────────────────────────────── */
 function buildUI(){
+  if(document.getElementById('rc-fab'))return;
   var style=document.createElement('style');style.textContent=CSS;
   (document.head||document.documentElement).appendChild(style);
 
@@ -1900,6 +1949,11 @@ function buildUI(){
 loadState();
 ST.widerWidth=Math.max(0.35,Number(ST.widerWidth)||0);
 ST.widerStereo=Math.max(0.8,Number(ST.widerStereo)||0);
-(function tryBuild(){if(document.body)buildUI();else setTimeout(tryBuild,100);})();
+window.__REXXCORD_ENSURE_UI__=function(){
+  if(document.getElementById('rc-fab'))return;
+  if(document.body)buildUI();
+  else setTimeout(window.__REXXCORD_ENSURE_UI__,100);
+};
+window.__REXXCORD_ENSURE_UI__();
 
 })();

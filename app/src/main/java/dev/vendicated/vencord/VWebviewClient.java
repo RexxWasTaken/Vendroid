@@ -34,6 +34,8 @@ public class VWebviewClient extends WebViewClient {
 
     @Override
     public void onPageFinished(WebView view, String url) {
+        // Retry the local hook after the DOM is available; its bootstrap is idempotent.
+        view.evaluateJavascript(HttpClient.RexxRuntime, null);
         view.setVisibility(View.VISIBLE);
         super.onPageFinished(view, url);
     }
