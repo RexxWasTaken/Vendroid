@@ -15,6 +15,16 @@ public class VChromeClient extends WebChromeClient {
     }
 
     @Override
+    public void onPermissionRequest(PermissionRequest request) {
+        activity.handleWebPermissionRequest(request);
+    }
+
+    @Override
+    public void onPermissionRequestCanceled(PermissionRequest request) {
+        activity.cancelWebPermissionRequest(request);
+    }
+
+    @Override
     public boolean onConsoleMessage(ConsoleMessage msg) {
         var m = String.format(Locale.ENGLISH, "[Javascript] %s @ %d: %s", msg.message(), msg.lineNumber(), msg.sourceId());
         switch (msg.messageLevel()) {

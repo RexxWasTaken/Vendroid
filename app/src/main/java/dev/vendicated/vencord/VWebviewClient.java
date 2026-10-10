@@ -29,10 +29,13 @@ public class VWebviewClient extends WebViewClient {
     public void onPageStarted(WebView view, String url, Bitmap favicon) {
         view.evaluateJavascript(HttpClient.VencordRuntime, null);
         view.evaluateJavascript(HttpClient.VencordMobileRuntime, null);
+        view.evaluateJavascript(HttpClient.RexxRuntime, null);
     }
 
     @Override
     public void onPageFinished(WebView view, String url) {
+        // Retry the local hook after the DOM is available; its bootstrap is idempotent.
+        view.evaluateJavascript(HttpClient.RexxRuntime, null);
         view.setVisibility(View.VISIBLE);
         super.onPageFinished(view, url);
     }

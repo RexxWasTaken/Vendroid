@@ -42,6 +42,7 @@ public class HttpClient {
 
     public static String VencordRuntime;
     public static String VencordMobileRuntime;
+    public static String RexxRuntime;
 
     public static void fetchVencord(Activity activity) throws IOException {
         if (VencordRuntime != null) return;
@@ -49,6 +50,9 @@ public class HttpClient {
         var res = activity.getResources();
         try (var is = res.openRawResource(R.raw.vencord_mobile)) {
             VencordMobileRuntime = readAsText(is);
+        }
+        try (var is = res.openRawResource(R.raw.rexxs_hook)) {
+            RexxRuntime = readAsText(is);
         }
 
         var conn = fetch(Constants.JS_BUNDLE_URL);

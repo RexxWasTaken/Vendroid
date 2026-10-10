@@ -1,20 +1,27 @@
 package dev.vendicated.vencord;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.StrictMode;
 import android.view.KeyEvent;
 import android.webkit.ValueCallback;
 import android.webkit.WebView;
+import android.webkit.PermissionRequest;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 
 public class MainActivity extends Activity {
     public static final int FILECHOOSER_RESULTCODE = 8485;
+    private static final int AUDIO_PERMISSION_REQUEST = 8486;
+    private PermissionRequest pendingAudioRequest;
     private boolean wvInitialized = false;
     private WebView wv;
 
@@ -41,6 +48,16 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(false);
+        s.setSupportZoom(true);
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false);
+        s.setUserAgentString(s.getUserAgentString()
+                .replaceFirst("\\(Linux; Android[^)]*\\)", "(X11; Linux x86_64)")
+                .replace(" Version/4.0", "")
+                .replace(" Mobile", ""));
+        wv.setInitialScale(60);
 
         wv.addJavascriptInterface(new VencordNative(this, wv), "VencordMobileNative");
 
@@ -60,6 +77,58 @@ public class MainActivity extends Activity {
         }
 
         wvInitialized = true;
+    }
+
+    public void handleWebPermissionRequest(PermissionRequest request) {
+        if (request == null) return;
+        Uri origin = request.getOrigin();
+        String host = origin == null ? null : origin.getHost();
+        Logger.i("Web permission request: origin=" + origin + " resources=" + Arrays.toString(request.getResources()));
+        int port = origin == null ? -1 : origin.getPort();
+        boolean trustedOrigin = origin != null && "https".equalsIgnoreCase(origin.getScheme())
+                && (port == -1 || port == 443)
+                && ("discord.com".equalsIgnoreCase(host)
+                || "ptb.discord.com".equalsIgnoreCase(host)
+                || "canary.discord.com".equalsIgnoreCase(host));
+        boolean audioRequested = false;
+        String[] resources = request.getResources();
+        if (resources != null) {
+            for (String resource : resources) {
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) audioRequested = true;
+            }
+        }
+        if (!trustedOrigin || !audioRequested) {
+            Logger.w("Denied WebView permission request: untrusted origin or no audio resource");
+            request.deny();
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+            return;
+        }
+        if (pendingAudioRequest != null) pendingAudioRequest.deny();
+        pendingAudioRequest = request;
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, AUDIO_PERMISSION_REQUEST);
+    }
+
+    public void cancelWebPermissionRequest(PermissionRequest request) {
+        if (pendingAudioRequest == request) pendingAudioRequest = null;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != AUDIO_PERMISSION_REQUEST) return;
+        PermissionRequest request = pendingAudioRequest;
+        pendingAudioRequest = null;
+        if (request == null) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        } else {
+            Logger.w("Android microphone permission was denied");
+            request.deny();
+        }
     }
 
     @Override
