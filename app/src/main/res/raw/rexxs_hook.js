@@ -724,8 +724,23 @@ function connectStereoFallback(src,dest,ctx){
 var audioDevices=navigator.mediaDevices;
 if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCORD_GUM_PATCHED__){
   var _gum=audioDevices.getUserMedia.bind(audioDevices);
+  function passThroughMic(stream){
+    var tracks=stream.getAudioTracks?stream.getAudioTracks():[];
+    tracks.forEach(function(track){
+      track.addEventListener('ended',function(){setMicStatus(false);},{once:true});
+    });
+    setMicStatus(true);
+    return stream;
+  }
+  function micCaptureError(e){
+    console.warn('[Rexx gum]',e);
+    setMicStatus(false,e.name||'Mic error');
+    setStatus('MIC ERROR','#f87171');
+    throw e;
+  }
   audioDevices.getUserMedia=function(c){
-    if(!c||!c.audio||!ST.on)return _gum(c);
+    if(!c||!c.audio)return _gum(c);
+    if(!ST.on)return _gum(c).then(passThroughMic,micCaptureError);
     var audioConstraints=typeof c.audio==='object'?c.audio:{};
     var processedConstraints=Object.assign({},c,{
       audio:Object.assign({},audioConstraints,{
@@ -754,6 +769,7 @@ if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCO
           setStatus('STEREO FALLBACK','#f59e0b');
         }
         var outputTrack=dest.stream.getAudioTracks()[0];
+        if(!outputTrack)throw new Error('DSP destination did not provide an audio track');
         if(outputTrack)outputTrack.addEventListener('ended',function(){
           stream.getTracks().forEach(function(track){track.stop();});
           setMicStatus(false);
@@ -765,15 +781,9 @@ if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCO
         try{if(dest)dest.stream.getTracks().forEach(function(track){track.stop();});}catch(stopError){}
         console.warn('[Rexx] DSP setup failed; keeping the live microphone unprocessed',e);
         setStatus('DSP BYPASS','#f59e0b');
-        setMicStatus(true);
-        return stream;
+        return passThroughMic(stream);
       }
-    },function(e){
-      console.warn('[Rexx gum]',e);
-      setMicStatus(false,e.name||'Mic error');
-      setStatus('MIC ERROR','#f87171');
-      throw e;
-    });
+    },micCaptureError);
   };
   window.__REXXCORD_GUM_PATCHED__=true;
 }
