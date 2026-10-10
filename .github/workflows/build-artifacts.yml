@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING_KEYS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.KEYSTORE_ALIAS != '' && secrets.KEYSTORE_PASSWORD != '' }}
     
     steps:
       - name: Checkout builds
@@ -22,12 +24,14 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       
       - name: Setup credentials
+        if: env.HAS_SIGNING_KEYS == 'true'
         run: |
           base64 -d <<< "$KEYSTORE_BASE64" > $HOME/keystore.jks
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           
-      - name: Build Artifact
+      - name: Build signed release artifact
+        if: env.HAS_SIGNING_KEYS == 'true'
         run: |
           chmod +x ./gradlew
           ./gradlew app:assembleRelease \
@@ -41,7 +45,14 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
 
+      - name: Build unsigned debug artifact
+        if: env.HAS_SIGNING_KEYS != 'true'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew app:assembleDebug
+
       - uses: actions/upload-artifact@main
         with:
           name: VencordDev
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

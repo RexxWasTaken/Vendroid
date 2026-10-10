@@ -362,8 +362,20 @@ class RexxEngine extends AudioWorkletProcessor{
     if(!i0||!i0[0])return true;
     if(p.on[0]<0.5){
       for(var i=0;i<i0[0].length;i++){
-        o0[0][i]=i0[0][i]||0;
-        if(o0[1])o0[1][i]=(i0[1]?i0[1][i]:i0[0][i])||0;
+        var bypassL=i0[0][i]||0;
+        var bypassR=(i0[1]?i0[1][i]:bypassL)||0;
+        if(!i0[1]){
+          this.haasR[this.haasPos]=bypassL;
+          var bypassDelay=Math.max(1,Math.round(Math.max(0.5,p.widerDepth[0])*this.haasLen));
+          var bypassIdx=(this.haasPos+this.haasLen-bypassDelay)%this.haasLen;
+          var bypassDelayed=this.haasR[bypassIdx];
+          this.haasPos=(this.haasPos+1)%this.haasLen;
+          var bypassSide=(bypassL-bypassDelayed)*0.5*Math.max(0.8,Math.min(1,p.widerStereo[0]))*2;
+          bypassL+=bypassSide;
+          bypassR-=bypassSide;
+        }
+        o0[0][i]=this.limitSample(bypassL);
+        if(o0[1])o0[1][i]=this.limitSample(bypassR);
       }
       return true;
     }
@@ -568,7 +580,9 @@ var CHAIN={
   loadWorklet:function(ctx,src,dest){
     var self=this;this._src=src;this._dest=dest;
     var blob=new Blob([WK],{type:'application/javascript'});
-    ctx.audioWorklet.addModule(URL.createObjectURL(blob)).then(function(){
+    var moduleUrl=URL.createObjectURL(blob);
+    return ctx.audioWorklet.addModule(moduleUrl).then(function(){
+      URL.revokeObjectURL(moduleUrl);
       self.node=new AudioWorkletNode(ctx,'rexx-engine',{
         numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]
       });
@@ -582,14 +596,10 @@ self.node.connect(dest);
       self.node.connect(self.mon);self.mon.connect(ctx.destination);
       self.update();
       setStatus('ACTIVE','#22c55e');setMicStatus(true);
-    }).catch(function(e){console.error('[Rexx]',e);setStatus('ERR','#f87171');});
-  },
-  tryInject:function(stream){
-    var ctx=window.__RexxCtx;
-    if(!ctx){setTimeout(function(){CHAIN.tryInject(stream);},300);return;}
-    var src=ctx.createMediaStreamSource(stream),dest=ctx.createMediaStreamDestination();
-    try{dest.channelCount=2;}catch(e){}
-    src.connect(dest);this.loadWorklet(ctx,src,dest);
+    }).catch(function(e){
+      URL.revokeObjectURL(moduleUrl);
+      console.error('[Rexx]',e);setStatus('ERR','#f87171');throw e;
+    });
   },
   setMon:function(on){
     ST.monOn=on;
@@ -684,20 +694,35 @@ if(_NAC){
 }
 var _gum=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
 navigator.mediaDevices.getUserMedia=function(c){
-  if(c&&c.audio){
-    var dev=(c.audio&&c.audio.deviceId)||undefined;
-    c.audio={deviceId:dev,echoCancellation:false,noiseSuppression:false,autoGainControl:false,sampleRate:48000,channelCount:{ideal:2}};
-  }
-  return _gum(c).then(function(stream){
-    if(!c||!c.audio)return stream;
+  if(!c||!c.audio)return _gum(c);
+  var audioConstraints=typeof c.audio==='object'?c.audio:{};
+  var processedConstraints=Object.assign({},c,{
+    audio:Object.assign({},audioConstraints,{
+      echoCancellation:false,
+      noiseSuppression:false,
+      autoGainControl:false,
+      sampleRate:{ideal:48000},
+      channelCount:{ideal:2}
+    })
+  });
+  var inputStream;
+  return _gum(processedConstraints).then(async function(stream){
+    inputStream=stream;
     setMicStatus(true);
-    var ctx=window.__RexxCtx;
-    if(!ctx){setTimeout(function(){CHAIN.tryInject(stream);},500);return stream;}
+    var ctx=window.__RexxCtx||new window.AudioContext({latencyHint:'interactive'});
+    if(ctx.state==='suspended')await ctx.resume();
     var src=ctx.createMediaStreamSource(stream),dest=ctx.createMediaStreamDestination();
     try{dest.channelCount=2;}catch(e){}
-    src.connect(dest);CHAIN.loadWorklet(ctx,src,dest);
+    await CHAIN.loadWorklet(ctx,src,dest);
+    var outputTrack=dest.stream.getAudioTracks()[0];
+    if(outputTrack)outputTrack.addEventListener('ended',function(){
+      stream.getTracks().forEach(function(track){track.stop();});
+    },{once:true});
     return dest.stream;
-  }).catch(function(e){console.warn('[Rexx gum]',e);setMicStatus(false);return _gum(c);});
+  }).catch(function(e){
+    if(inputStream)inputStream.getTracks().forEach(function(track){track.stop();});
+    console.warn('[Rexx gum]',e);setMicStatus(false);throw e;
+  });
 };
 
 /* ─── HELPERS ─────────────────────────────────────────────────── */
