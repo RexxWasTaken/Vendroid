@@ -725,23 +725,24 @@ var audioDevices=navigator.mediaDevices;
 if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCORD_GUM_PATCHED__){
   var _gum=audioDevices.getUserMedia.bind(audioDevices);
   audioDevices.getUserMedia=function(c){
-    if(!c||!c.audio)return _gum(c);
+    if(!c||!c.audio||!ST.on)return _gum(c);
     var audioConstraints=typeof c.audio==='object'?c.audio:{};
     var processedConstraints=Object.assign({},c,{
       audio:Object.assign({},audioConstraints,{
-        echoCancellation:false,
-        noiseSuppression:false,
-        autoGainControl:false,
-        channelCount:{ideal:2}
+        echoCancellation:audioConstraints.echoCancellation??false,
+        noiseSuppression:audioConstraints.noiseSuppression??false,
+        autoGainControl:audioConstraints.autoGainControl??false,
+        sampleRate:audioConstraints.sampleRate??{ideal:48000},
+        channelCount:audioConstraints.channelCount??{ideal:2}
       })
     });
-    var inputStream;
     return _gum(processedConstraints).then(async function(stream){
-      inputStream=stream;
+      var ctx,src,dest;
       try{
-        var ctx=getRexxAudioContext();
+        ctx=getRexxAudioContext();
         if(ctx.state==='suspended')await ctx.resume();
-        var src=ctx.createMediaStreamSource(stream),dest=ctx.createMediaStreamDestination();
+        src=ctx.createMediaStreamSource(stream);
+        dest=ctx.createMediaStreamDestination();
         try{dest.channelCount=2;}catch(e){}
         try{
           await CHAIN.loadWorklet(ctx,src,dest);
@@ -760,10 +761,14 @@ if(audioDevices&&typeof audioDevices.getUserMedia==='function'&&!window.__REXXCO
         setMicStatus(true);
         return dest.stream;
       }catch(e){
-        stream.getTracks().forEach(function(track){track.stop();});
-        throw e;
+        try{if(src)src.disconnect();}catch(disconnectError){}
+        try{if(dest)dest.stream.getTracks().forEach(function(track){track.stop();});}catch(stopError){}
+        console.warn('[Rexx] DSP setup failed; keeping the live microphone unprocessed',e);
+        setStatus('DSP BYPASS','#f59e0b');
+        setMicStatus(true);
+        return stream;
       }
-    }).catch(function(e){
+    },function(e){
       console.warn('[Rexx gum]',e);
       setMicStatus(false,e.name||'Mic error');
       setStatus('MIC ERROR','#f87171');

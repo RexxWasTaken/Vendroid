@@ -84,13 +84,18 @@ public class MainActivity extends Activity {
         Uri origin = request.getOrigin();
         String host = origin == null ? null : origin.getHost();
         Logger.i("Web permission request: origin=" + origin + " resources=" + Arrays.toString(request.getResources()));
+        int port = origin == null ? -1 : origin.getPort();
         boolean trustedOrigin = origin != null && "https".equalsIgnoreCase(origin.getScheme())
+                && (port == -1 || port == 443)
                 && ("discord.com".equalsIgnoreCase(host)
                 || "ptb.discord.com".equalsIgnoreCase(host)
                 || "canary.discord.com".equalsIgnoreCase(host));
         boolean audioRequested = false;
-        for (String resource : request.getResources()) {
-            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) audioRequested = true;
+        String[] resources = request.getResources();
+        if (resources != null) {
+            for (String resource : resources) {
+                if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) audioRequested = true;
+            }
         }
         if (!trustedOrigin || !audioRequested) {
             Logger.w("Denied WebView permission request: untrusted origin or no audio resource");
