@@ -1,55 +1,69 @@
+
 name: Release
 
 on:
-push:
-tags:
-- 'v*'
-pull_request:
-branches:
-- main
-workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
-contents: write
+  contents: write
 
 jobs:
-build:
-runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-steps:
-  - name: Checkout source
-    uses: actions/checkout@v4
+      - name: Set up Java 17 for Android SDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-  - name: Setup JDK 17 for Android SDK
-    uses: actions/setup-java@v4
-    with:
-      java-version: '17'
-      distribution: temurin
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-  - name: Setup Android SDK
-    uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --sdk_root="${ANDROID_HOME}" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
 
-  - name: Install Android SDK packages
-    run: |
-      sdkmanager --sdk_root="${ANDROID_HOME}" \
-        "platform-tools" \
-        "platforms;android-33" \
-        "build-tools;33.0.2"
+      - name: Set up Java 11 for Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
 
-  - name: Setup JDK 11 for Gradle
-    uses: actions/setup-java@v4
-    with:
-      java-version: '11'
-      distribution: temurin
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "Vendroid-${GITHUB_REF_NAME}.apk"
 
-  - name: Build APK
-    run: |
-      chmod +x ./gradlew
-      ./gradlew app:assembleDebug
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vendroid-Release-${{ github.ref_name }}
+          path: Vendroid-${{ github.ref_name }}.apk
+          if-no-files-found: error
 
-  - name: Upload APK
-    uses: actions/upload-artifact@v4
-    with:
-      name: Vendroid-Debug
-      path: app/build/outputs/apk/debug/app-debug.apk
-      if-no-files-found: error
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "Vendroid-${GITHUB_REF_NAME}.apk" \
+            --generate-notes \
+            --title "Vendroid ${GITHUB_REF_NAME}"
+            
