@@ -4,6 +4,9 @@ on:
 push:
 tags:
 - 'v*'
+pull_request:
+branches:
+- main
 workflow_dispatch:
 
 permissions:
@@ -28,7 +31,6 @@ steps:
 
   - name: Install Android SDK packages
     run: |
-      set -e
       sdkmanager --sdk_root="${ANDROID_HOME}" \
         "platform-tools" \
         "platforms;android-33" \
@@ -40,46 +42,14 @@ steps:
       java-version: '11'
       distribution: temurin
 
-  - name: Setup credentials
-    shell: bash
-    env:
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+  - name: Build APK
     run: |
-      set -e
-      if [ -z "$KEYSTORE_BASE64" ]; then
-        echo "Missing GitHub Secret: KEYSTORE_BASE64"
-        exit 1
-      fi
-      echo "$KEYSTORE_BASE64" | base64 --decode > "$HOME/keystore.jks"
-      test -s "$HOME/keystore.jks"
-
-  - name: Get release tag
-    shell: bash
-    run: echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
-
-  - name: Build Release APK
-    shell: bash
-    env:
-      KEY_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-    run: |
-      set -e
       chmod +x ./gradlew
-      ./gradlew app:assembleRelease \
-        -Pandroid.injected.signing.store.file="$HOME/keystore.jks" \
-        -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-        -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-        -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+      ./gradlew app:assembleDebug
 
-      cp app/build/outputs/apk/release/app-release.apk \
-        "Vendroid-${RELEASE_TAG}.apk"
-
-  - name: Publish GitHub Release
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    run: |
-      gh release create "$RELEASE_TAG" \
-        "Vendroid-${RELEASE_TAG}.apk" \
-        --generate-notes \
-        --title "Vendroid ${RELEASE_TAG}"
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: Vendroid-Debug
+      path: app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
