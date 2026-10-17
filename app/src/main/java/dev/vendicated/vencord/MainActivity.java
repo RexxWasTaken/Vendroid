@@ -17,6 +17,7 @@ public class MainActivity extends Activity {
     public static final int FILECHOOSER_RESULTCODE = 8485;
     private boolean wvInitialized = false;
     private WebView wv;
+    private VChromeClient chromeClient;
 
     public ValueCallback<Uri[]> filePathCallback;
 
@@ -35,7 +36,8 @@ public class MainActivity extends Activity {
         explodeAndroid();
 
         wv.setWebViewClient(new VWebviewClient());
-        wv.setWebChromeClient(new VChromeClient(this));
+        chromeClient = new VChromeClient(this);
+        wv.setWebChromeClient(chromeClient);
 
         var s = wv.getSettings();
         s.setJavaScriptEnabled(true);
@@ -101,6 +103,38 @@ public class MainActivity extends Activity {
             filePathCallback.onReceiveValue(uris);
         }
         filePathCallback = null;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (chromeClient != null) {
+            chromeClient.onAndroidPermissionResult(requestCode, grantResults);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (wv != null) {
+            wv.evaluateJavascript(
+                    "window.__REXX_LOUD_MIC__ && window.__REXX_LOUD_MIC__.setForeground(false)",
+                    null
+            );
+            wv.onPause();
+        }
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (wv != null) {
+            wv.onResume();
+            wv.evaluateJavascript(
+                    "window.__REXX_LOUD_MIC__ && window.__REXX_LOUD_MIC__.setForeground(true)",
+                    null
+            );
+        }
     }
 
     private void explodeAndroid() {
