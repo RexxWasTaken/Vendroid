@@ -1,60 +1,55 @@
-name: Build REXX Vendroid APK
+name: Android APK
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - rexx/loud-mic-controls
+push:
+pull_request:
+branches:
+- main
+workflow_dispatch:
 
 permissions:
-  contents: write
+contents: write
 
 jobs:
-  android-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
+build:
+runs-on: ubuntu-latest
 
-      - name: Set up Java 17 for Android SDK tools
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+steps:
+  - name: Checkout source
+    uses: actions/checkout@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+  - name: Set up Java 17 for Android SDK
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
 
-      - name: Install Android 33 SDK
-        run: sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools"
+  - name: Set up Android SDK
+    uses: android-actions/setup-android@v3
 
-      - name: Set up Java 11 for Gradle
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "11"
+  - name: Install Android 33 SDK
+    shell: bash
+    run: |
+      set -e
+      sdkmanager --sdk_root="$ANDROID_HOME" \
+        "platform-tools" \
+        "platforms;android-33" \
+        "build-tools;33.0.2"
 
-      - name: Run available unit tests and build APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew --no-daemon clean :app:testDebugUnitTest :app:assembleDebug
+  - name: Set up Java 11 for Gradle
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '11'
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Vendroid-REXX-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+  - name: Build Debug APK
+    run: |
+      chmod +x ./gradlew
+      ./gradlew app:assembleDebug
 
-      - name: Publish installable APK release asset
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APK_PATH: app/build/outputs/apk/debug/app-debug.apk
-          RELEASE_TAG: rexx-loud-mic-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gh release create "$RELEASE_TAG" "$APK_PATH" \
-            --target "$GITHUB_SHA" \
-            --title "Vendroid REXX Loud Mic APK" \
-            --prerelease \
-            --notes "Installable debug-signed APK built from the REXX Loud Mic source branch. This debug package uses the .dbg application ID and installs separately from a release-signed Vendroid build."
+  - name: Upload APK artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: Vendroid-Debug
+      path: app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
