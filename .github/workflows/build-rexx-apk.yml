@@ -8,7 +8,7 @@ branches:
 workflow_dispatch:
 
 permissions:
-contents: write
+contents: read
 
 jobs:
 build:
@@ -27,11 +27,11 @@ steps:
   - name: Set up Android SDK
     uses: android-actions/setup-android@v3
 
-  - name: Install Android 33 SDK
+  - name: Install Android SDK packages
     shell: bash
     run: |
       set -e
-      sdkmanager --sdk_root="$ANDROID_HOME" \
+      sdkmanager --sdk_root="${ANDROID_HOME}" \
         "platform-tools" \
         "platforms;android-33" \
         "build-tools;33.0.2"
@@ -43,7 +43,9 @@ steps:
       java-version: '11'
 
   - name: Build Debug APK
+    shell: bash
     run: |
+      set -e
       chmod +x ./gradlew
       ./gradlew app:assembleDebug
 
