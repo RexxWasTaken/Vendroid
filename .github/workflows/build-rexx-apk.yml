@@ -1,57 +1,62 @@
+
 name: Android APK
 
 on:
-push:
-pull_request:
-branches:
-- main
-workflow_dispatch:
+  push:
+    branches:
+      - main
+      - rexx/loud-mic-controls
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-steps:
-  - name: Checkout source
-    uses: actions/checkout@v4
+      - name: Set up Java 17 for Android SDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-  - name: Set up Java 17 for Android SDK
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-  - name: Set up Android SDK
-    uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --sdk_root="${ANDROID_HOME}" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
 
-  - name: Install Android SDK packages
-    shell: bash
-    run: |
-      set -e
-      sdkmanager --sdk_root="${ANDROID_HOME}" \
-        "platform-tools" \
-        "platforms;android-33" \
-        "build-tools;33.0.2"
+      - name: Set up Java 11 for Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
 
-  - name: Set up Java 11 for Gradle
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '11'
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon app:assembleDebug
 
-  - name: Build Debug APK
-    shell: bash
-    run: |
-      set -e
-      chmod +x ./gradlew
-      ./gradlew app:assembleDebug
-
-  - name: Upload APK artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: Vendroid-Debug
-      path: app/build/outputs/apk/debug/app-debug.apk
-      if-no-files-found: error
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vendroid-Debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+          
