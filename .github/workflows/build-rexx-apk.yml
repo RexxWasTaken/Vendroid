@@ -17,6 +17,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -30,10 +31,16 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager --sdk_root="${ANDROID_HOME}" --licenses || true
+
       - name: Install Android SDK packages
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
           sdkmanager --sdk_root="${ANDROID_HOME}" \
             "platform-tools" \
             "platforms;android-33" \
@@ -48,7 +55,7 @@ jobs:
       - name: Build Debug APK
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
           chmod +x ./gradlew
           ./gradlew --no-daemon app:assembleDebug
 
