@@ -16,17 +16,23 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up Java 11
+      - name: Set up Java 17 for Android SDK tools
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "11"
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android 33 SDK
         run: sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools"
+
+      - name: Set up Java 11 for Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
 
       - name: Run available unit tests and build APK
         run: |
