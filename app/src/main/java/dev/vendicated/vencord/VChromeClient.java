@@ -22,6 +22,11 @@ public class VChromeClient extends WebChromeClient {
 
     @Override
     public void onPermissionRequest(PermissionRequest request) {
+        if (!isTrustedDiscordOrigin(request)) {
+            request.deny();
+            return;
+        }
+
         boolean requestsAudio = false;
         for (String resource : request.getResources()) {
             if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
@@ -57,6 +62,17 @@ public class VChromeClient extends WebChromeClient {
         if (pendingAudioRequest == request) {
             pendingAudioRequest = null;
         }
+    }
+
+    private boolean isTrustedDiscordOrigin(PermissionRequest request) {
+        Uri origin = request.getOrigin();
+        String host = origin.getHost();
+        if (!"https".equalsIgnoreCase(origin.getScheme()) || host == null) {
+            return false;
+        }
+
+        String normalizedHost = host.toLowerCase(Locale.ROOT);
+        return "discord.com".equals(normalizedHost) || normalizedHost.endsWith(".discord.com");
     }
 
     public void onAndroidPermissionResult(int requestCode, int[] grantResults) {
