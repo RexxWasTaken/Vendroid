@@ -40,9 +40,7 @@ public class VChromeClient extends WebChromeClient {
             return;
         }
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                == PackageManager.PERMISSION_GRANTED) {
+        if (hasAudioCapturePermission()) {
             grantAudioCapture(request);
             return;
         }
@@ -51,10 +49,16 @@ public class VChromeClient extends WebChromeClient {
             pendingAudioRequest.deny();
         }
         pendingAudioRequest = request;
-        activity.requestPermissions(
-                new String[]{Manifest.permission.RECORD_AUDIO},
-                AUDIO_PERMISSION_REQUEST_CODE
-        );
+        try {
+            activity.requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    AUDIO_PERMISSION_REQUEST_CODE
+            );
+        } catch (RuntimeException ex) {
+            pendingAudioRequest = null;
+            request.deny();
+            Logger.e("Failed to request Android microphone permission", ex);
+        }
     }
 
     @Override
@@ -75,21 +79,54 @@ public class VChromeClient extends WebChromeClient {
         return "discord.com".equals(normalizedHost) || normalizedHost.endsWith(".discord.com");
     }
 
-    public void onAndroidPermissionResult(int requestCode, int[] grantResults) {
+    public void onAndroidPermissionResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults
+    ) {
         if (requestCode != AUDIO_PERMISSION_REQUEST_CODE || pendingAudioRequest == null) {
             return;
         }
 
         PermissionRequest request = pendingAudioRequest;
         pendingAudioRequest = null;
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        boolean audioPermissionGranted = false;
+        if (permissions != null && grantResults != null) {
+            for (int i = 0; i < permissions.length && i < grantResults.length; i++) {
+                if (Manifest.permission.RECORD_AUDIO.equals(permissions[i])
+                        && grantResults[i] == PackageManager.PERMISSION_GRANTED) {
+                    audioPermissionGranted = true;
+                    break;
+                }
+            }
+        }
+
+        if (audioPermissionGranted && hasAudioCapturePermission()) {
             grantAudioCapture(request);
         } else {
             request.deny();
         }
     }
 
+    public void onActivityDestroyed() {
+        if (pendingAudioRequest != null) {
+            pendingAudioRequest.deny();
+            pendingAudioRequest = null;
+        }
+    }
+
+    private boolean hasAudioCapturePermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void grantAudioCapture(PermissionRequest request) {
+        if (!hasAudioCapturePermission()) {
+            request.deny();
+            return;
+        }
+
         for (String resource : request.getResources()) {
             if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
                 request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});

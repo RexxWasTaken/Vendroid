@@ -46,6 +46,8 @@ public class MainActivity extends Activity {
         s.setUserAgentString(buildDesktopUserAgent(s.getUserAgentString()));
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
+        // WebRTC call audio can start after the user joins a voice channel.
+        s.setMediaPlaybackRequiresUserGesture(false);
 
         wv.addJavascriptInterface(new VencordNative(this, wv), "VencordMobileNative");
 
@@ -112,8 +114,16 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (chromeClient != null) {
-            chromeClient.onAndroidPermissionResult(requestCode, grantResults);
+            chromeClient.onAndroidPermissionResult(requestCode, permissions, grantResults);
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (chromeClient != null) {
+            chromeClient.onActivityDestroyed();
+        }
+        super.onDestroy();
     }
 
     @Override
