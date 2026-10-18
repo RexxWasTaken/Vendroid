@@ -6,11 +6,11 @@
 
     const STORAGE_KEY = "rexx.loudMic.settings.v1";
     const DEFAULTS = {
-        enabled: false,
-        gainDb: 0,
+        enabled: true,
+        gainDb: 18,
         width: 100,
         pan: 0,
-        preset: "CLEAN"
+        preset: "LOUD"
     };
 
     function clamp(value, min, max) {
@@ -20,9 +20,12 @@
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+            const savedGainDb = saved.preset === "LOUD" && Number(saved.gainDb) === 8
+                ? 18
+                : saved.gainDb ?? DEFAULTS.gainDb;
             return {
                 enabled: typeof saved.enabled === "boolean" ? saved.enabled : DEFAULTS.enabled,
-                gainDb: clamp(saved.gainDb ?? DEFAULTS.gainDb, 0, 18),
+                gainDb: clamp(savedGainDb, 0, 30),
                 width: clamp(saved.width ?? DEFAULTS.width, 0, 200),
                 pan: clamp(saved.pan ?? DEFAULTS.pan, -100, 100),
                 preset: ["CLEAN", "LOUD", "CUSTOM"].includes(saved.preset)
@@ -495,7 +498,7 @@
     }
 
     function setSlider(name, value) {
-        if (name === "gainDb") state.gainDb = clamp(value, 0, 18);
+        if (name === "gainDb") state.gainDb = clamp(value, 0, 30);
         if (name === "width") state.width = clamp(value, 0, 200);
         if (name === "pan") state.pan = clamp(value, -100, 100);
         markCustom();
@@ -510,7 +513,7 @@
             state.pan = 0;
         } else if (preset === "LOUD") {
             state.enabled = true;
-            state.gainDb = 8;
+            state.gainDb = 18;
             state.width = 100;
             state.pan = 0;
         }
@@ -756,11 +759,11 @@
                             <span class="value" id="gainValue">+0.0 dB</span>
                         </div>
                         <div class="row">
-                            <span class="sub">Digital amplification · hardware gain is not exposed</span>
+                            <span class="sub">Digital boost · stronger settings also raise background noise</span>
                             <button class="reset-one" type="button" data-reset="gainDb">RESET</button>
                         </div>
-                        <input id="gain" type="range" min="0" max="18" step="0.5" value="0" aria-label="Software input gain in decibels">
-                        <div class="bounds"><span>0 dB</span><span>+18 dB</span></div>
+                        <input id="gain" type="range" min="0" max="30" step="0.5" value="18" aria-label="Software input gain in decibels">
+                        <div class="bounds"><span>0 dB</span><span>+30 dB</span></div>
                         <div class="meters">
                             <div class="meterline"><span class="metername">INPUT</span><div class="metertrack"><div class="meterbar" id="inputBar"></div></div><span class="reading" id="inputReading">−∞ dBFS</span></div>
                             <div class="meterline"><span class="metername">OUTPUT</span><div class="metertrack"><div class="meterbar" id="outputBar"></div></div><span class="reading" id="outputReading">−∞ dBFS</span></div>
@@ -795,7 +798,7 @@
                         <div class="bounds"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
                     </div>
                     <div class="notice" id="notice" role="status"></div>
-                    <p class="footnote">The app can adjust its own Discord WebView audio stream. Android does not expose physical mic gain here; clipping already present at the microphone hardware cannot be undone.</p>
+                    <p class="footnote">Boost applies only to Vendroid’s Discord mic stream. Android does not expose physical mic gain here; high boost can make room noise more noticeable, and hardware clipping cannot be undone.</p>
                     <footer class="footer">
                         <label class="master">
                             <input id="master" type="checkbox" aria-label="Master processing on or off">
