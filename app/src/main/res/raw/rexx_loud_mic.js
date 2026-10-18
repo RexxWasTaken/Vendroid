@@ -5,9 +5,10 @@
     window.__REXX_LOUD_MIC_INSTALLED__ = true;
 
     const STORAGE_KEY = "rexx.loudMic.settings.v1";
+    const MAX_GAIN_DB = 100;
     const DEFAULTS = {
         enabled: true,
-        gainDb: 30,
+        gainDb: 60,
         width: 100,
         pan: 0,
         preset: "LOUD"
@@ -21,12 +22,12 @@
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
             const savedGainDb = saved.preset === "LOUD" &&
-                [8, 18].includes(Number(saved.gainDb))
-                ? 30
+                [8, 18, 30, 46].includes(Number(saved.gainDb))
+                ? DEFAULTS.gainDb
                 : saved.gainDb ?? DEFAULTS.gainDb;
             return {
                 enabled: typeof saved.enabled === "boolean" ? saved.enabled : DEFAULTS.enabled,
-                gainDb: clamp(savedGainDb, 0, 46),
+                gainDb: clamp(savedGainDb, 0, MAX_GAIN_DB),
                 width: clamp(saved.width ?? DEFAULTS.width, 0, 200),
                 pan: clamp(saved.pan ?? DEFAULTS.pan, -100, 100),
                 preset: ["CLEAN", "LOUD", "CUSTOM"].includes(saved.preset)
@@ -501,7 +502,7 @@
     }
 
     function setSlider(name, value) {
-        if (name === "gainDb") state.gainDb = clamp(value, 0, 46);
+        if (name === "gainDb") state.gainDb = clamp(value, 0, MAX_GAIN_DB);
         if (name === "width") state.width = clamp(value, 0, 200);
         if (name === "pan") state.pan = clamp(value, -100, 100);
         markCustom();
@@ -516,7 +517,7 @@
             state.pan = 0;
         } else if (preset === "LOUD") {
             state.enabled = true;
-            state.gainDb = 30;
+            state.gainDb = DEFAULTS.gainDb;
             state.width = 100;
             state.pan = 0;
         }
@@ -765,8 +766,8 @@
                             <span class="sub">Digital boost · stronger settings also raise background noise</span>
                             <button class="reset-one" type="button" data-reset="gainDb">RESET</button>
                         </div>
-                        <input id="gain" type="range" min="0" max="46" step="0.5" value="30" aria-label="Software input gain in decibels">
-                        <div class="bounds"><span>0 dB</span><span>+46 dB · ≈200×</span></div>
+                        <input id="gain" type="range" min="0" max="100" step="0.5" value="60" aria-label="Software input gain in decibels">
+                        <div class="bounds"><span>0 dB</span><span>+100 dB · 100,000× pre-limiter</span></div>
                         <div class="meters">
                             <div class="meterline"><span class="metername">INPUT</span><div class="metertrack"><div class="meterbar" id="inputBar"></div></div><span class="reading" id="inputReading">−∞ dBFS</span></div>
                             <div class="meterline"><span class="metername">OUTPUT</span><div class="metertrack"><div class="meterbar" id="outputBar"></div></div><span class="reading" id="outputReading">−∞ dBFS</span></div>
@@ -801,7 +802,7 @@
                         <div class="bounds"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
                     </div>
                     <div class="notice" id="notice" role="status"></div>
-                    <p class="footnote">+46 dB is about 200× digital amplitude; the limiter protects peaks, but high boost raises room noise. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
+                    <p class="footnote">LOUD starts at +60 dB; the slider reaches +100 dB, but levels above about +60 dB mostly add noise and hit the digital limiter—200 dB cannot produce usable extra loudness. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
                     <footer class="footer">
                         <label class="master">
                             <input id="master" type="checkbox" aria-label="Master processing on or off">
