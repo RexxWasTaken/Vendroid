@@ -7,7 +7,7 @@
     const STORAGE_KEY = "rexx.loudMic.settings.v1";
     const DEFAULTS = {
         enabled: true,
-        gainDb: 18,
+        gainDb: 30,
         width: 100,
         pan: 0,
         preset: "LOUD"
@@ -20,12 +20,13 @@
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-            const savedGainDb = saved.preset === "LOUD" && Number(saved.gainDb) === 8
-                ? 18
+            const savedGainDb = saved.preset === "LOUD" &&
+                [8, 18].includes(Number(saved.gainDb))
+                ? 30
                 : saved.gainDb ?? DEFAULTS.gainDb;
             return {
                 enabled: typeof saved.enabled === "boolean" ? saved.enabled : DEFAULTS.enabled,
-                gainDb: clamp(savedGainDb, 0, 30),
+                gainDb: clamp(savedGainDb, 0, 46),
                 width: clamp(saved.width ?? DEFAULTS.width, 0, 200),
                 pan: clamp(saved.pan ?? DEFAULTS.pan, -100, 100),
                 preset: ["CLEAN", "LOUD", "CUSTOM"].includes(saved.preset)
@@ -316,7 +317,7 @@
         const wrappedGetUserMedia = function (constraints) {
             const wantsAudio = !!(constraints && constraints.audio);
             let contextAtGesture = null;
-            if (wantsAudio) {
+            if (wantsAudio && state.enabled) {
                 try {
                     // Create/resume synchronously while Discord's voice-button gesture is active.
                     contextAtGesture = ensureAudioContext();
@@ -327,7 +328,9 @@
 
             return originalGetUserMedia(constraints).then(async stream => {
                 const audioTracks = stream.getAudioTracks();
-                if (!wantsAudio || audioTracks.length === 0) return stream;
+                // Master-off is a true raw-mic bypass; do not send a Web Audio destination
+                // track when the user is troubleshooting Discord's silent-input error.
+                if (!wantsAudio || !state.enabled || audioTracks.length === 0) return stream;
 
                 const createdProcessors = [];
                 try {
@@ -498,7 +501,7 @@
     }
 
     function setSlider(name, value) {
-        if (name === "gainDb") state.gainDb = clamp(value, 0, 30);
+        if (name === "gainDb") state.gainDb = clamp(value, 0, 46);
         if (name === "width") state.width = clamp(value, 0, 200);
         if (name === "pan") state.pan = clamp(value, -100, 100);
         markCustom();
@@ -513,7 +516,7 @@
             state.pan = 0;
         } else if (preset === "LOUD") {
             state.enabled = true;
-            state.gainDb = 18;
+            state.gainDb = 30;
             state.width = 100;
             state.pan = 0;
         }
@@ -762,8 +765,8 @@
                             <span class="sub">Digital boost · stronger settings also raise background noise</span>
                             <button class="reset-one" type="button" data-reset="gainDb">RESET</button>
                         </div>
-                        <input id="gain" type="range" min="0" max="30" step="0.5" value="18" aria-label="Software input gain in decibels">
-                        <div class="bounds"><span>0 dB</span><span>+30 dB</span></div>
+                        <input id="gain" type="range" min="0" max="46" step="0.5" value="30" aria-label="Software input gain in decibels">
+                        <div class="bounds"><span>0 dB</span><span>+46 dB · ≈200×</span></div>
                         <div class="meters">
                             <div class="meterline"><span class="metername">INPUT</span><div class="metertrack"><div class="meterbar" id="inputBar"></div></div><span class="reading" id="inputReading">−∞ dBFS</span></div>
                             <div class="meterline"><span class="metername">OUTPUT</span><div class="metertrack"><div class="meterbar" id="outputBar"></div></div><span class="reading" id="outputReading">−∞ dBFS</span></div>
@@ -798,7 +801,7 @@
                         <div class="bounds"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
                     </div>
                     <div class="notice" id="notice" role="status"></div>
-                    <p class="footnote">Boost applies only to Vendroid’s Discord mic stream. Android does not expose physical mic gain here; high boost can make room noise more noticeable, and hardware clipping cannot be undone.</p>
+                    <p class="footnote">+46 dB is about 200× digital amplitude; the limiter protects peaks, but high boost raises room noise. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
                     <footer class="footer">
                         <label class="master">
                             <input id="master" type="checkbox" aria-label="Master processing on or off">
