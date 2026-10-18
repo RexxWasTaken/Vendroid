@@ -43,6 +43,9 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
+        s.setUserAgentString(buildDesktopUserAgent(s.getUserAgentString()));
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);
 
         wv.addJavascriptInterface(new VencordNative(this, wv), "VencordMobileNative");
 
@@ -144,6 +147,22 @@ public class MainActivity extends Activity {
                         .permitNetwork()
                         .build()
         );
+    }
+
+    private String buildDesktopUserAgent(String currentUserAgent) {
+        String chromeVersion = "120.0.0.0";
+        int chromeVersionStart = currentUserAgent.indexOf("Chrome/");
+        if (chromeVersionStart >= 0) {
+            chromeVersionStart += "Chrome/".length();
+            int chromeVersionEnd = currentUserAgent.indexOf(' ', chromeVersionStart);
+            chromeVersion = currentUserAgent.substring(
+                    chromeVersionStart,
+                    chromeVersionEnd >= 0 ? chromeVersionEnd : currentUserAgent.length()
+            );
+        }
+
+        return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                + "(KHTML, like Gecko) Chrome/" + chromeVersion + " Safari/537.36";
     }
 
     public void handleUrl(Uri url) {
