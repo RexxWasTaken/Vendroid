@@ -6,9 +6,11 @@
 
     const STORAGE_KEY = "rexx.loudMic.settings.v1";
     const MAX_GAIN_DB = 100;
+    const MAX_DISTORTION = 100;
     const DEFAULTS = {
         enabled: true,
         gainDb: 60,
+        distortion: 100,
         width: 100,
         pan: 0,
         preset: "LOUD"
@@ -28,6 +30,11 @@
             return {
                 enabled: typeof saved.enabled === "boolean" ? saved.enabled : DEFAULTS.enabled,
                 gainDb: clamp(savedGainDb, 0, MAX_GAIN_DB),
+                distortion: clamp(
+                    saved.distortion ?? (saved.preset === "CLEAN" ? 0 : DEFAULTS.distortion),
+                    0,
+                    MAX_DISTORTION
+                ),
                 width: clamp(saved.width ?? DEFAULTS.width, 0, 200),
                 pan: clamp(saved.pan ?? DEFAULTS.pan, -100, 100),
                 preset: ["CLEAN", "LOUD", "CUSTOM"].includes(saved.preset)
@@ -44,6 +51,7 @@
     const outputProcessors = new WeakMap();
     let audioContext = null;
     let captureHookReady = false;
+    let captureHookRetryTimer = 0;
     let panelOpen = false;
     let foreground = document.visibilityState !== "hidden";
     let animationTimer = 0;
@@ -98,6 +106,16 @@
         return curve;
     }
 
+    function makeDriveCurve(amount) {
+        const curve = new Float32Array(4096);
+        const drive = 1 + Math.pow(clamp(amount, 0, MAX_DISTORTION) / MAX_DISTORTION, 2) * 79;
+        for (let i = 0; i < curve.length; i++) {
+            const x = (i * 2) / (curve.length - 1) - 1;
+            curve[i] = Math.max(-1, Math.min(1, x * drive));
+        }
+        return curve;
+    }
+
     function channelSummary() {
         let stereo = 0;
         let mono = 0;
@@ -121,7 +139,7 @@
         const { total } = channelSummary();
         if (total === 0) return state.enabled ? "ARMED · WAITING FOR MIC" : "READY · NO ACTIVE MIC";
         return state.enabled
-            ? `PROCESSING · ${total} MIC${total === 1 ? "" : "S"}`
+            ? `PROCESSED MIC → DISCORD · ${total}`
             : `BYPASS · ${total} MIC${total === 1 ? "" : "S"}`;
     }
 
@@ -130,6 +148,11 @@
         const enabled = state.enabled;
         const gain = enabled ? Math.pow(10, state.gainDb / 20) : 1;
         ramp(processor.inputGain.gain, gain, audioContext);
+        const distortionAmount = enabled ? state.distortion : 0;
+        if (processor.distortionAmount !== distortionAmount) {
+            processor.overdrive.curve = makeDriveCurve(distortionAmount);
+            processor.distortionAmount = distortionAmount;
+        }
 
         if (processor.channelKind === "stereo") {
             ramp(processor.sideScale.gain, enabled ? state.width / 100 : 1, audioContext);
@@ -166,6 +189,9 @@
         const inputMeter = context.createAnalyser();
         inputMeter.fftSize = 512;
         const inputGain = context.createGain();
+        const overdrive = context.createWaveShaper();
+        overdrive.oversample = "none";
+        overdrive.curve = makeDriveCurve(state.enabled ? state.distortion : 0);
         const compressor = context.createDynamicsCompressor();
         compressor.attack.value = 0.003;
         compressor.release.value = 0.12;
@@ -180,7 +206,7 @@
         source.connect(inputMeter);
         inputMeter.connect(inputGain);
 
-        const nodes = [source, inputMeter, inputGain, compressor, limiter, outputMeter, destination];
+        const nodes = [source, inputMeter, inputGain, overdrive, compressor, limiter, outputMeter, destination];
         let sideScale = null;
         let panLeft = null;
         let panRight = null;
@@ -206,7 +232,8 @@
             midRight.gain.value = 0.5;
             sideLeft.gain.value = 0.5;
             sideRight.gain.value = -0.5;
-            inputGain.connect(splitter);
+            inputGain.connect(overdrive);
+            overdrive.connect(splitter);
             splitter.connect(midLeft, 0);
             splitter.connect(midRight, 1);
             splitter.connect(sideLeft, 0);
@@ -233,7 +260,8 @@
             );
         } else {
             monoPanner = context.createStereoPanner();
-            inputGain.connect(monoPanner);
+            inputGain.connect(overdrive);
+            overdrive.connect(monoPanner);
             monoPanner.connect(compressor);
             nodes.push(monoPanner);
         }
@@ -250,6 +278,8 @@
             inputMeter,
             outputMeter,
             inputGain,
+            overdrive,
+            distortionAmount: state.enabled ? state.distortion : 0,
             compressor,
             limiter,
             limiterEnabled: state.enabled,
@@ -308,9 +338,21 @@
     }
 
     function installCaptureHook() {
+        if (captureHookReady) return;
         const mediaDevices = navigator.mediaDevices;
         if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
             permissionMessage = "This WebView does not expose microphone capture.";
+            if (!captureHookRetryTimer) {
+                let attempts = 0;
+                captureHookRetryTimer = window.setInterval(() => {
+                    if (captureHookReady || attempts++ >= 20) {
+                        window.clearInterval(captureHookRetryTimer);
+                        captureHookRetryTimer = 0;
+                        return;
+                    }
+                    installCaptureHook();
+                }, 250);
+            }
             return;
         }
 
@@ -389,6 +431,11 @@
             }
         }
 
+        if (captureHookReady && captureHookRetryTimer) {
+            window.clearInterval(captureHookRetryTimer);
+            captureHookRetryTimer = 0;
+        }
+        if (captureHookReady) permissionMessage = "";
         if (mediaDevices.addEventListener) {
             mediaDevices.addEventListener("devicechange", updateUI);
         }
@@ -488,6 +535,10 @@
         if (!ui) return;
         ui.gain.value = String(state.gainDb);
         ui.gainValue.textContent = `${state.gainDb > 0 ? "+" : ""}${state.gainDb.toFixed(1)} dB`;
+        ui.distortion.value = String(state.distortion);
+        ui.distortionValue.textContent = state.distortion === 0
+            ? "OFF"
+            : `${Math.round(state.distortion)}% · ${state.distortion >= 80 ? "HARD CLIP" : "OVERDRIVE"}`;
         ui.width.value = String(state.width);
         ui.widthValue.textContent = `${Math.round(state.width)}%`;
         ui.pan.value = String(state.pan);
@@ -503,6 +554,7 @@
 
     function setSlider(name, value) {
         if (name === "gainDb") state.gainDb = clamp(value, 0, MAX_GAIN_DB);
+        if (name === "distortion") state.distortion = clamp(value, 0, MAX_DISTORTION);
         if (name === "width") state.width = clamp(value, 0, 200);
         if (name === "pan") state.pan = clamp(value, -100, 100);
         markCustom();
@@ -513,11 +565,13 @@
         if (preset === "CLEAN") {
             state.enabled = true;
             state.gainDb = 0;
+            state.distortion = 0;
             state.width = 100;
             state.pan = 0;
         } else if (preset === "LOUD") {
             state.enabled = true;
             state.gainDb = DEFAULTS.gainDb;
+            state.distortion = DEFAULTS.distortion;
             state.width = 100;
             state.pan = 0;
         }
@@ -535,6 +589,7 @@
 
     function resetOne(name) {
         if (name === "gainDb") state.gainDb = 0;
+        if (name === "distortion") state.distortion = 0;
         if (name === "width") state.width = 100;
         if (name === "pan") state.pan = 0;
         markCustom();
@@ -774,6 +829,18 @@
                             <div class="meterstate" id="meterState">NO ACTIVE MIC</div>
                         </div>
                     </div>
+                    <div class="card distortion">
+                        <div class="row">
+                            <span class="label">OVERDRIVE · HARD CLIP</span>
+                            <span class="value" id="distortionValue">100% · HARD CLIP</span>
+                        </div>
+                        <div class="row">
+                            <span class="sub">Adds deliberate distortion to the mic track sent to Discord</span>
+                            <button class="reset-one" type="button" data-reset="distortion">RESET</button>
+                        </div>
+                        <input id="distortion" type="range" min="0" max="100" step="1" value="100" aria-label="Microphone overdrive distortion">
+                        <div class="bounds"><span>OFF</span><span>100% · CRUSHED</span></div>
+                    </div>
                     <div class="card">
                         <div class="row">
                             <span class="label">STEREO WIDTH</span>
@@ -802,7 +869,7 @@
                         <div class="bounds"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
                     </div>
                     <div class="notice" id="notice" role="status"></div>
-                    <p class="footnote">LOUD starts at +60 dB; the slider reaches +100 dB, but levels above about +60 dB mostly add noise and hit the digital limiter—200 dB cannot produce usable extra loudness. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
+                    <p class="footnote">LOUD sends the processed mic track to Discord with hard clipping enabled. +100 dB is 100,000× pre-limiter; above about +60 dB mostly adds noise and saturation, not clean loudness. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
                     <footer class="footer">
                         <label class="master">
                             <input id="master" type="checkbox" aria-label="Master processing on or off">
@@ -829,6 +896,8 @@
             channelStatus: $("#channelStatus"),
             gain: $("#gain"),
             gainValue: $("#gainValue"),
+            distortion: $("#distortion"),
+            distortionValue: $("#distortionValue"),
             width: $("#width"),
             widthValue: $("#widthValue"),
             pan: $("#pan"),
@@ -851,6 +920,7 @@
         });
         ui.panel.addEventListener("click", event => event.stopPropagation());
         ui.gain.addEventListener("input", () => setSlider("gainDb", ui.gain.value));
+        ui.distortion.addEventListener("input", () => setSlider("distortion", ui.distortion.value));
         ui.width.addEventListener("input", () => setSlider("width", ui.width.value));
         ui.pan.addEventListener("input", () => setSlider("pan", ui.pan.value));
         ui.master.addEventListener("change", () => {

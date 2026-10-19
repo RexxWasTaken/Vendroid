@@ -2,6 +2,7 @@ package dev.vendicated.vencord;
 
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.view.View;
 import android.webkit.*;
 
@@ -34,6 +35,15 @@ public class VWebviewClient extends WebViewClient {
 
     @Override
     public void onPageFinished(WebView view, String url) {
+        String host = Uri.parse(url).getHost();
+        if (host != null
+                && ("discord.com".equalsIgnoreCase(host)
+                || host.toLowerCase(Locale.ROOT).endsWith(".discord.com"))
+                && HttpClient.RexxMobileRuntime != null) {
+            // Re-run the idempotent mic hook after the document exists. onPageStarted can
+            // execute before WebView has initialized navigator.mediaDevices.
+            view.evaluateJavascript(HttpClient.RexxMobileRuntime, null);
+        }
         view.setVisibility(View.VISIBLE);
         super.onPageFinished(view, url);
     }
