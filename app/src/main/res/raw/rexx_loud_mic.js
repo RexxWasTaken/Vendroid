@@ -9,8 +9,9 @@
     const MAX_DISTORTION = 100;
     const DEFAULTS = {
         enabled: true,
-        gainDb: 60,
+        gainDb: 100,
         distortion: 100,
+        pttEnabled: false,
         width: 100,
         pan: 0,
         preset: "LOUD"
@@ -24,7 +25,7 @@
         try {
             const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
             const savedGainDb = saved.preset === "LOUD" &&
-                [8, 18, 30, 46].includes(Number(saved.gainDb))
+                [8, 18, 30, 46, 60].includes(Number(saved.gainDb))
                 ? DEFAULTS.gainDb
                 : saved.gainDb ?? DEFAULTS.gainDb;
             return {
@@ -35,6 +36,7 @@
                     0,
                     MAX_DISTORTION
                 ),
+                pttEnabled: saved.enabled !== false && saved.pttEnabled === true,
                 width: clamp(saved.width ?? DEFAULTS.width, 0, 200),
                 pan: clamp(saved.pan ?? DEFAULTS.pan, -100, 100),
                 preset: ["CLEAN", "LOUD", "CUSTOM"].includes(saved.preset)
@@ -52,6 +54,9 @@
     let audioContext = null;
     let captureHookReady = false;
     let captureHookRetryTimer = 0;
+    let pttKeyHeld = false;
+    let pttButtonHeld = false;
+    let pttLocked = false;
     let panelOpen = false;
     let foreground = document.visibilityState !== "hidden";
     let animationTimer = 0;
@@ -87,6 +92,55 @@
         } catch (_) {
             param.value = value;
         }
+    }
+
+    function isPttOpen() {
+        return !state.pttEnabled || pttLocked || pttKeyHeld || pttButtonHeld;
+    }
+
+    function updatePttUI() {
+        if (!ui) return;
+        const available = state.enabled;
+        ui.pttMode.disabled = !available;
+        ui.pttHold.disabled = !available || !state.pttEnabled;
+        ui.pttLock.disabled = !available || !state.pttEnabled;
+        ui.pttMode.textContent = state.pttEnabled ? "PTT MODE · ON" : "PTT MODE · OFF";
+        ui.pttMode.setAttribute("aria-pressed", String(state.pttEnabled));
+        ui.pttLock.textContent = pttLocked ? "UNLOCK MIC" : "LOCK MIC OPEN";
+        ui.pttLock.setAttribute("aria-pressed", String(pttLocked));
+
+        if (!available) {
+            ui.pttStatus.textContent = "MASTER OFF · RAW MIC · PTT DISABLED";
+        } else if (!state.pttEnabled) {
+            ui.pttStatus.textContent = "MIC OPEN · PTT OFF";
+        } else if (pttLocked) {
+            ui.pttStatus.textContent = "MIC OPEN · LOCKED";
+        } else if (pttKeyHeld || pttButtonHeld) {
+            ui.pttStatus.textContent = "MIC OPEN · TRANSMITTING";
+        } else {
+            ui.pttStatus.textContent = "MIC MUTED · HOLD RIGHT ALT OR BUTTON";
+        }
+    }
+
+    function applyPttState() {
+        const open = isPttOpen() ? 1 : 0;
+        for (const processor of processors) {
+            if (!processor.disposed) ramp(processor.pttGate.gain, open, audioContext);
+        }
+        updatePttUI();
+    }
+
+    function isRightAlt(event) {
+        return event.code === "AltRight"
+            || event.key === "AltGraph"
+            || (event.key === "Alt" && event.location === 2);
+    }
+
+    function isEditableTarget(target) {
+        if (!target || target.isContentEditable) return !!(target && target.isContentEditable);
+        const tag = String(target.tagName || "").toUpperCase();
+        return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+            || !!(target.closest && target.closest('[contenteditable="true"], [role="textbox"]'));
     }
 
     function makeLimiterCurve(enabled) {
@@ -148,6 +202,7 @@
         const enabled = state.enabled;
         const gain = enabled ? Math.pow(10, state.gainDb / 20) : 1;
         ramp(processor.inputGain.gain, gain, audioContext);
+        ramp(processor.pttGate.gain, isPttOpen() ? 1 : 0, audioContext);
         const distortionAmount = enabled ? state.distortion : 0;
         if (processor.distortionAmount !== distortionAmount) {
             processor.overdrive.curve = makeDriveCurve(distortionAmount);
@@ -200,13 +255,15 @@
         limiter.curve = makeLimiterCurve(state.enabled);
         const outputMeter = context.createAnalyser();
         outputMeter.fftSize = 512;
+        const pttGate = context.createGain();
+        pttGate.gain.value = isPttOpen() ? 1 : 0;
         const destination = context.createMediaStreamDestination();
 
         // The meter is a real tap of the microphone samples, before software gain.
         source.connect(inputMeter);
         inputMeter.connect(inputGain);
 
-        const nodes = [source, inputMeter, inputGain, overdrive, compressor, limiter, outputMeter, destination];
+        const nodes = [source, inputMeter, inputGain, overdrive, compressor, limiter, pttGate, outputMeter, destination];
         let sideScale = null;
         let panLeft = null;
         let panRight = null;
@@ -267,7 +324,8 @@
         }
 
         compressor.connect(limiter);
-        limiter.connect(outputMeter);
+        limiter.connect(pttGate);
+        pttGate.connect(outputMeter);
         outputMeter.connect(destination);
         const outputTrack = destination.stream.getAudioTracks()[0];
         outputTrack.enabled = inputTrack.enabled;
@@ -282,6 +340,7 @@
             distortionAmount: state.enabled ? state.distortion : 0,
             compressor,
             limiter,
+            pttGate,
             limiterEnabled: state.enabled,
             channelKind,
             sideScale,
@@ -446,6 +505,12 @@
         const nextForeground = !!isForeground;
         if (nextForeground !== foreground) {
             foreground = nextForeground;
+            if (!foreground) {
+                pttKeyHeld = false;
+                pttButtonHeld = false;
+                pttLocked = false;
+                applyPttState();
+            }
             for (const processor of processors) {
                 if (!foreground) {
                     processor.wasEnabledBeforeBackground = processor.inputTrack.enabled;
@@ -543,6 +608,7 @@
         ui.widthValue.textContent = `${Math.round(state.width)}%`;
         ui.pan.value = String(state.pan);
         updateStatus();
+        updatePttUI();
     }
 
     function markCustom() {
@@ -582,8 +648,12 @@
 
     function resetAll() {
         Object.assign(state, DEFAULTS);
+        pttKeyHeld = false;
+        pttButtonHeld = false;
+        pttLocked = false;
         saveSettings();
         for (const processor of processors) applyProcessor(processor);
+        applyPttState();
         updateUI();
     }
 
@@ -733,6 +803,17 @@
                     border:0; padding:4px 2px; color:#a99ab4; background:transparent;
                     font-size:10px; font-weight:700; cursor:pointer; letter-spacing:.04em;
                 }
+                .ptt-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:11px; }
+                .ptt-action {
+                    min-height:40px; padding:0 10px; border:1px solid rgba(190,145,226,.28);
+                    border-radius:11px; color:#eadcf5; background:rgba(133,61,181,.18);
+                    font-size:9px; font-weight:850; letter-spacing:.06em; cursor:pointer;
+                }
+                .ptt-action[aria-pressed="true"] { border-color:rgba(216,160,255,.75); background:rgba(133,61,181,.45); }
+                .ptt-action:disabled { opacity:.38; cursor:not-allowed; }
+                .ptt-hold { grid-column:1 / -1; min-height:48px; background:linear-gradient(110deg,#632d91,#9a4cc8); touch-action:none; user-select:none; -webkit-user-select:none; }
+                .ptt-hold:not(:disabled):active { background:linear-gradient(110deg,#8e43c3,#bd6cf0); transform:scale(.99); }
+                .ptt-status { margin-top:9px; color:#c99aff; font-size:9px; font-weight:800; letter-spacing:.07em; }
                 input[type=range] {
                     appearance:none; -webkit-appearance:none; display:block; width:100%;
                     height:25px; margin:10px 0 1px; background:transparent; cursor:pointer;
@@ -821,7 +902,7 @@
                             <span class="sub">Digital boost · stronger settings also raise background noise</span>
                             <button class="reset-one" type="button" data-reset="gainDb">RESET</button>
                         </div>
-                        <input id="gain" type="range" min="0" max="100" step="0.5" value="60" aria-label="Software input gain in decibels">
+                        <input id="gain" type="range" min="0" max="100" step="0.5" value="100" aria-label="Software input gain in decibels">
                         <div class="bounds"><span>0 dB</span><span>+100 dB · 100,000× pre-limiter</span></div>
                         <div class="meters">
                             <div class="meterline"><span class="metername">INPUT</span><div class="metertrack"><div class="meterbar" id="inputBar"></div></div><span class="reading" id="inputReading">−∞ dBFS</span></div>
@@ -840,6 +921,19 @@
                         </div>
                         <input id="distortion" type="range" min="0" max="100" step="1" value="100" aria-label="Microphone overdrive distortion">
                         <div class="bounds"><span>OFF</span><span>100% · CRUSHED</span></div>
+                    </div>
+                    <div class="card ptt">
+                        <div class="row">
+                            <span class="label">PUSH TO TALK</span>
+                            <span class="value" style="font-size:12px">RIGHT ALT</span>
+                        </div>
+                        <div class="sub">Turn PTT on, then hold Right Alt or the button. Lock keeps the mic open.</div>
+                        <div class="ptt-buttons">
+                            <button class="ptt-action" id="pttMode" type="button" aria-pressed="false">PTT MODE · OFF</button>
+                            <button class="ptt-action" id="pttLock" type="button" aria-pressed="false" disabled>LOCK MIC OPEN</button>
+                            <button class="ptt-action ptt-hold" id="pttHold" type="button" disabled>HOLD TO TALK · RIGHT ALT</button>
+                        </div>
+                        <div class="ptt-status" id="pttStatus" role="status">MIC OPEN · PTT OFF</div>
                     </div>
                     <div class="card">
                         <div class="row">
@@ -869,7 +963,7 @@
                         <div class="bounds"><span>LEFT</span><span>CENTER</span><span>RIGHT</span></div>
                     </div>
                     <div class="notice" id="notice" role="status"></div>
-                    <p class="footnote">LOUD sends the processed mic track to Discord with hard clipping enabled. +100 dB is 100,000× pre-limiter; above about +60 dB mostly adds noise and saturation, not clean loudness. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
+                    <p class="footnote">LOUD starts at +100 dB with hard clipping. That's already the full digital range; more dB cannot make it louder and only increases saturation/noise. PTT needs MASTER on. If Discord shows 3002, turn MASTER off and rejoin to send the raw mic. Android does not expose hardware mic gain.</p>
                     <footer class="footer">
                         <label class="master">
                             <input id="master" type="checkbox" aria-label="Master processing on or off">
@@ -902,6 +996,10 @@
             widthValue: $("#widthValue"),
             pan: $("#pan"),
             panValue: $("#panValue"),
+            pttMode: $("#pttMode"),
+            pttHold: $("#pttHold"),
+            pttLock: $("#pttLock"),
+            pttStatus: $("#pttStatus"),
             master: $("#master"),
             preset: $("#preset"),
             notice: $("#notice"),
@@ -923,11 +1021,51 @@
         ui.distortion.addEventListener("input", () => setSlider("distortion", ui.distortion.value));
         ui.width.addEventListener("input", () => setSlider("width", ui.width.value));
         ui.pan.addEventListener("input", () => setSlider("pan", ui.pan.value));
+        ui.pttMode.addEventListener("click", () => {
+            if (!state.enabled) return;
+            state.pttEnabled = !state.pttEnabled;
+            pttKeyHeld = false;
+            pttButtonHeld = false;
+            pttLocked = false;
+            saveSettings();
+            applyPttState();
+        });
+        ui.pttLock.addEventListener("click", () => {
+            if (!state.enabled || !state.pttEnabled) return;
+            pttLocked = !pttLocked;
+            if (pttLocked) {
+                pttKeyHeld = false;
+                pttButtonHeld = false;
+            }
+            applyPttState();
+        });
+        const releasePttButton = () => {
+            if (!pttButtonHeld) return;
+            pttButtonHeld = false;
+            applyPttState();
+        };
+        ui.pttHold.addEventListener("pointerdown", event => {
+            if (!state.enabled || !state.pttEnabled || (event.button !== undefined && event.button !== 0)) return;
+            event.preventDefault();
+            pttButtonHeld = true;
+            try { ui.pttHold.setPointerCapture(event.pointerId); } catch (_) {}
+            applyPttState();
+        });
+        ui.pttHold.addEventListener("pointerup", releasePttButton);
+        ui.pttHold.addEventListener("pointercancel", releasePttButton);
+        ui.pttHold.addEventListener("lostpointercapture", releasePttButton);
         ui.master.addEventListener("change", () => {
             state.enabled = ui.master.checked;
             state.preset = "CUSTOM";
+            if (!state.enabled) {
+                state.pttEnabled = false;
+                pttKeyHeld = false;
+                pttButtonHeld = false;
+                pttLocked = false;
+            }
             saveSettings();
             for (const processor of processors) applyProcessor(processor);
+            applyPttState();
             updateUI();
         });
         ui.preset.addEventListener("change", () => applyPreset(ui.preset.value));
@@ -957,6 +1095,30 @@
     ensurePanel();
     installCaptureHook();
 
+    document.addEventListener("keydown", event => {
+        if (!state.enabled || !state.pttEnabled || !isRightAlt(event) || isEditableTarget(event.target)) return;
+        if (!event.repeat) {
+            pttKeyHeld = true;
+            applyPttState();
+        }
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    }, true);
+    document.addEventListener("keyup", event => {
+        if (!state.pttEnabled || !isRightAlt(event)) return;
+        pttKeyHeld = false;
+        applyPttState();
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    }, true);
+    window.addEventListener("blur", () => {
+        if (!pttKeyHeld && !pttButtonHeld) return;
+        pttKeyHeld = false;
+        pttButtonHeld = false;
+        applyPttState();
+    });
     document.addEventListener("keydown", event => {
         if (event.key === "Escape" && panelOpen) {
             event.stopPropagation();
